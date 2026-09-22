@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { Megaphone, Users, ArrowRight, LogOut, Lock } from "lucide-react";
+import { Megaphone, Users, ArrowRight, LogOut, Lock, BarChart3, ExternalLink } from "lucide-react";
 import { LuxtonMark, LuxtonWordmark } from "../components/Logo";
 import { useAuth, PAPEL_LABEL } from "../lib/auth";
 
@@ -7,7 +7,8 @@ type Modulo = {
   titulo: string;
   subtitulo: string;
   icon: typeof Megaphone;
-  to: string;
+  to?: string; // rota interna
+  href?: string; // link externo (abre em nova aba)
   liberado: boolean;
 };
 
@@ -20,6 +21,13 @@ export default function Home() {
       subtitulo: "Segmentação e exportação da base de leads.",
       icon: Megaphone,
       to: "/campanhas",
+      liberado: podeCampanhas,
+    },
+    {
+      titulo: "Dashboard de Locações",
+      subtitulo: "Painel de locações (abre no Google Sites).",
+      icon: BarChart3,
+      href: "https://sites.google.com/luxtonimoveis.com.br/dashboardv2/dashboard-loca%C3%A7%C3%A3o",
       liberado: podeCampanhas,
     },
     {
@@ -88,19 +96,39 @@ export default function Home() {
 
 function ModuloCard({ m }: { m: Modulo }) {
   const Icon = m.icon;
-  return (
-    <Link to={m.to} className="block">
-      <div className="group relative flex h-full flex-col overflow-hidden border border-line-strong bg-white p-8 transition hover:border-forest-900 hover:shadow-[6px_6px_0_0_#0b3d2e]">
-        <div className="absolute inset-x-0 top-0 h-1 bg-green-accent" />
-        <div className="flex h-12 w-12 items-center justify-center bg-green-soft">
-          <Icon size={22} className="text-green-accent" />
-        </div>
-        <h2 className="font-title mt-5 text-2xl font-semibold text-forest-900">{m.titulo}</h2>
-        <p className="mt-1 text-sm text-neutral-600">{m.subtitulo}</p>
-        <div className="mt-6 inline-flex items-center gap-1 text-sm font-semibold text-forest-700 transition group-hover:gap-2">
-          Entrar <ArrowRight size={16} />
-        </div>
+  const externo = !!m.href;
+  const conteudo = (
+    <div className="group relative flex h-full flex-col overflow-hidden border border-line-strong bg-white p-8 transition hover:border-forest-900 hover:shadow-[6px_6px_0_0_#0b3d2e]">
+      <div className="absolute inset-x-0 top-0 h-1 bg-green-accent" />
+      <div className="flex h-12 w-12 items-center justify-center bg-green-soft">
+        <Icon size={22} className="text-green-accent" />
       </div>
+      <h2 className="font-title mt-5 text-2xl font-semibold text-forest-900">{m.titulo}</h2>
+      <p className="mt-1 text-sm text-neutral-600">{m.subtitulo}</p>
+      <div className="mt-6 inline-flex items-center gap-1 text-sm font-semibold text-forest-700 transition group-hover:gap-2">
+        {externo ? (
+          <>
+            Abrir <ExternalLink size={16} />
+          </>
+        ) : (
+          <>
+            Entrar <ArrowRight size={16} />
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  if (externo) {
+    return (
+      <a href={m.href} target="_blank" rel="noopener noreferrer" className="block">
+        {conteudo}
+      </a>
+    );
+  }
+  return (
+    <Link to={m.to!} className="block">
+      {conteudo}
     </Link>
   );
 }
