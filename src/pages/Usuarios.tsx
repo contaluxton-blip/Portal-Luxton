@@ -35,6 +35,12 @@ type UsuarioRow = {
 
 type FormNovo = { nome: string; email: string; papel: Papel };
 
+// Status derivado: convidado que ainda não definiu a senha (nunca acessou) fica
+// "pendente"; desativado pelo admin fica "inativo"; senão "ativo".
+type StatusUsuario = "ativo" | "pendente" | "inativo";
+const statusDe = (u: { ativo: boolean; ultimo_acesso: string | null }): StatusUsuario =>
+  !u.ativo ? "inativo" : u.ultimo_acesso ? "ativo" : "pendente";
+
 const dataHoraBR = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" }) : "Nunca acessou";
 
@@ -103,8 +109,9 @@ export default function Usuarios() {
   }, [usuarios, busca]);
 
   const totais = useMemo(() => {
-    const ativos = usuarios.filter((u) => u.ativo).length;
-    return { total: usuarios.length, ativos, inativos: usuarios.length - ativos };
+    const ativos = usuarios.filter((u) => statusDe(u) === "ativo").length;
+    const pendentes = usuarios.filter((u) => statusDe(u) === "pendente").length;
+    return { total: usuarios.length, ativos, pendentes };
   }, [usuarios]);
 
   // Nome de quem criou cada perfil (resolvido a partir da própria lista).
@@ -218,7 +225,7 @@ export default function Usuarios() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <ResumoCard icon={Users2} cor="#0b3d2e" label="Total de usuários" valor={totais.total} />
           <ResumoCard icon={UserCheck} cor="#2FA35A" label="Ativos" valor={totais.ativos} />
-          <ResumoCard icon={UserX} cor="#9a9a92" label="Inativos" valor={totais.inativos} />
+          <ResumoCard icon={UserX} cor="#b78227" label="Pendentes (sem senha)" valor={totais.pendentes} />
         </div>
 
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
@@ -274,7 +281,7 @@ export default function Usuarios() {
                         <PerfilBadge papel={u.papel} />
                       </td>
                       <td className="px-4 py-4">
-                        <StatusBadge ativo={u.ativo} />
+                        <StatusBadge status={statusDe(u)} />
                       </td>
                       <td className="whitespace-nowrap px-4 py-4 text-neutral-600">
                         {dataHoraBR(u.ultimo_acesso)}
@@ -523,15 +530,17 @@ function PerfilBadge({ papel }: { papel: Papel }) {
   );
 }
 
-function StatusBadge({ ativo }: { ativo: boolean }) {
+function StatusBadge({ status }: { status: StatusUsuario }) {
+  const estilo: Record<StatusUsuario, { cls: string; dot: string; label: string }> = {
+    ativo: { cls: "bg-emerald-50 text-emerald-700 ring-emerald-600/20", dot: "bg-emerald-500", label: "Ativo" },
+    pendente: { cls: "bg-amber-50 text-amber-700 ring-amber-600/20", dot: "bg-amber-500", label: "Pendente" },
+    inativo: { cls: "bg-neutral-100 text-neutral-500 ring-neutral-500/20", dot: "bg-neutral-400", label: "Inativo" },
+  };
+  const s = estilo[status];
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${
-        ativo ? "bg-emerald-50 text-emerald-700 ring-emerald-600/20" : "bg-neutral-100 text-neutral-500 ring-neutral-500/20"
-      }`}
-    >
-      <span className={`h-1.5 w-1.5 ${ativo ? "bg-emerald-500" : "bg-neutral-400"}`} />
-      {ativo ? "Ativo" : "Inativo"}
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${s.cls}`}>
+      <span className={`h-1.5 w-1.5 ${s.dot}`} />
+      {s.label}
     </span>
   );
 }
