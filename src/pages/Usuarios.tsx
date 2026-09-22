@@ -121,7 +121,11 @@ export default function Usuarios() {
   // Papéis que o usuário atual pode atribuir ao criar.
   const papeisDisponiveis: Papel[] = ehAdminGeral ? ["geral", "admin", "admin_geral"] : ["geral"];
 
-  const redirectTo = `${window.location.origin}/definir-senha`;
+  // Destino do link de convite/recuperação. Em localhost (dev) forçamos a URL
+  // de produção — senão o convidado receberia um link que só abre na sua máquina.
+  const ehLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+  const baseApp = ehLocal ? "https://portal-luxton.vercel.app" : window.location.origin;
+  const redirectTo = `${baseApp}/definir-senha`;
 
   const toggleAtivo = async (u: UsuarioRow) => {
     setOcupadoId(u.id);
