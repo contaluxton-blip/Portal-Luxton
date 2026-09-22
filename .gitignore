@@ -1,0 +1,17 @@
+# Dependências
+node_modules/
+
+# Build
+dist/
+*.tsbuildinfo
+
+# Variáveis de ambiente
+.env
+.env.local
+.env.*.local
+
+# Ferramentas locais (Claude Code)
+.claude/
+
+# Pasta duplicada aninhada (cópia acidental — não faz parte do projeto)
+/Portal Luxton/
