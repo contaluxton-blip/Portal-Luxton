@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+@theme {
+  /* Títulos em Futura (fallbacks geométricos p/ quem não tiver a fonte),
+     corpo em Arial. */
+  --font-title: "Futura", "Futura PT", "Century Gothic", "Trebuchet MS", Arial, sans-serif;
+  --font-body: Arial, Helvetica, sans-serif;
+
+  --color-forest-950: #07130d;
+  --color-forest-900: #0b3d2e;
+  --color-forest-800: #0f4a37;
+  --color-forest-700: #14603f;
+  --color-green-accent: #2fa35a;
+  --color-green-soft: #e6efe9;
+  --color-sand: #f4f4f1;
+  --color-ink: #141414;
+
+  /* Linhas de segmentação em verde suave (parente do fundo verde-claro). */
+  --color-line: #d6e5db;
+  --color-line-strong: #bcd6c6;
+
+  /* Menos cantos arredondados: quadrado é quadrado. */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-sand);
+  color: var(--color-ink);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-title {
+  font-family: var(--font-title);
+  letter-spacing: 0.01em;
+}
