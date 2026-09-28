@@ -19,6 +19,8 @@ import {
   X,
   Loader2,
   AlertTriangle,
+  Building2,
+  MapPin,
 } from "lucide-react";
 import { LuxtonMark } from "../components/Logo";
 import { MultiSelect, Chips, FonteFlags } from "../components/MultiSelect";
@@ -29,12 +31,14 @@ import {
   fetchCampanha,
   fetchFacets,
   fetchTodosLeads,
+  fetchDashboards,
   SEM_CANAL,
   SISTEMA_LABEL,
   type Finalidade,
   type FacetsCampanha,
   type LeadGrupo,
   type ResultadoCampanha,
+  type DashboardsCampanha,
 } from "../lib/campanhasApi";
 
 type Filtros = {
@@ -114,6 +118,7 @@ export default function Campanhas() {
 
   // Dados vindos do Supabase ao vivo.
   const [facets, setFacets] = useState<FacetsCampanha | null>(null);
+  const [dashboards, setDashboards] = useState<DashboardsCampanha | null>(null);
   const [resultado, setResultado] = useState<ResultadoCampanha | null>(null);
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -139,6 +144,11 @@ export default function Campanhas() {
     fetchFacets()
       .then(setFacets)
       .catch((e) => setErro(e?.message ?? "Falha ao carregar os filtros."));
+  }, []);
+
+  // Carrega os agregados dos gráficos do topo (silencioso se falhar).
+  useEffect(() => {
+    fetchDashboards().then(setDashboards).catch(() => {});
   }, []);
 
   // Busca no Supabase sempre que os filtros aplicados mudam.
@@ -399,7 +409,7 @@ export default function Campanhas() {
     <div className="min-h-full bg-sand">
       {/* Barra superior */}
       <div className="border-b border-line-strong bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+        <div className="mx-auto flex max-w-[1600px] items-center justify-between px-6 py-4">
           <Link to="/" className="flex items-center gap-3 transition hover:opacity-80" title="Voltar ao portal">
             <LuxtonMark size={36} />
             <div>
@@ -420,7 +430,57 @@ export default function Campanhas() {
         </div>
       </div>
 
-      <div className="mx-auto max-w-7xl px-6 py-8">
+      <div className="mx-auto max-w-[1600px] px-6 py-8">
+        {/* Gráficos: imóveis e bairros com mais leads, por finalidade */}
+        <section className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <BarChartCard
+            titulo="Imóveis com mais leads"
+            tag="Venda"
+            icon={Building2}
+            cor="#2FA35A"
+            carregando={!dashboards}
+            itens={(dashboards?.imoveis_venda ?? []).map((d) => ({
+              label: d.codigo,
+              sub: d.bairro ?? undefined,
+              total: d.total,
+            }))}
+          />
+          <BarChartCard
+            titulo="Imóveis com mais leads"
+            tag="Locação"
+            icon={Building2}
+            cor="#b78227"
+            carregando={!dashboards}
+            itens={(dashboards?.imoveis_locacao ?? []).map((d) => ({
+              label: d.codigo,
+              sub: d.bairro ?? undefined,
+              total: d.total,
+            }))}
+          />
+          <BarChartCard
+            titulo="Bairros mais procurados"
+            tag="Locação"
+            icon={MapPin}
+            cor="#b78227"
+            carregando={!dashboards}
+            itens={(dashboards?.bairros_locacao ?? []).map((d) => ({
+              label: d.bairro,
+              total: d.total,
+            }))}
+          />
+          <BarChartCard
+            titulo="Bairros mais procurados"
+            tag="Venda"
+            icon={MapPin}
+            cor="#2FA35A"
+            carregando={!dashboards}
+            itens={(dashboards?.bairros_venda ?? []).map((d) => ({
+              label: d.bairro,
+              total: d.total,
+            }))}
+          />
+        </section>
+
         {/* Perfis salvos */}
         <section className="mb-6 border border-line-strong bg-white p-4">
           <div className="flex items-center justify-between gap-3">
@@ -1161,6 +1221,72 @@ function ResumoCard({
       </div>
       <div className="font-title text-2xl font-semibold text-forest-900">{valor}</div>
       <div className="mt-0.5 text-xs text-neutral-600">{label}</div>
+    </div>
+  );
+}
+
+function BarChartCard({
+  titulo,
+  tag,
+  icon: Icon,
+  cor,
+  itens,
+  carregando,
+}: {
+  titulo: string;
+  tag: "Venda" | "Locação";
+  icon: typeof Building2;
+  cor: string;
+  itens: { label: string; sub?: string; total: number }[];
+  carregando?: boolean;
+}) {
+  const max = Math.max(1, ...itens.map((i) => i.total));
+  const tagCls = tag === "Venda" ? "bg-green-soft text-forest-800" : "bg-amber-50 text-amber-700";
+  return (
+    <div className="flex flex-col border border-line-strong bg-white p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center bg-green-soft">
+          <Icon size={16} className="text-forest-900" />
+        </div>
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-forest-900">{titulo}</div>
+          <span
+            className={`mt-0.5 inline-block px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tagCls}`}
+          >
+            {tag}
+          </span>
+        </div>
+      </div>
+      {carregando ? (
+        <div className="flex flex-1 items-center justify-center py-8 text-neutral-400">
+          <Loader2 size={18} className="animate-spin" />
+        </div>
+      ) : itens.length === 0 ? (
+        <p className="py-8 text-center text-xs text-neutral-400">Sem dados</p>
+      ) : (
+        <div className="space-y-2">
+          {itens.map((i, idx) => (
+            <div key={idx}>
+              <div className="flex items-baseline justify-between gap-2 text-xs">
+                <span
+                  className="truncate text-neutral-700"
+                  title={i.sub ? `${i.label} · ${i.sub}` : i.label}
+                >
+                  {i.label}
+                  {i.sub && <span className="text-neutral-400"> · {i.sub}</span>}
+                </span>
+                <span className="shrink-0 font-semibold text-neutral-800">{num(i.total)}</span>
+              </div>
+              <div className="mt-1 h-1.5 w-full bg-neutral-100">
+                <div
+                  className="h-1.5"
+                  style={{ width: `${(i.total / max) * 100}%`, backgroundColor: cor }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

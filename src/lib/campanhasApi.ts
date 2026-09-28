@@ -253,3 +253,25 @@ export async function fetchTodosLeads(f: FiltrosInput): Promise<LeadGrupo[]> {
 
   return agrupar(linhas);
 }
+
+// ---- Gráficos do topo (imóveis/bairros com mais leads, por finalidade) ----
+export type DashImovel = { codigo: string; bairro: string | null; total: number };
+export type DashBairro = { bairro: string; total: number };
+export type DashboardsCampanha = {
+  imoveis_venda: DashImovel[];
+  imoveis_locacao: DashImovel[];
+  bairros_venda: DashBairro[];
+  bairros_locacao: DashBairro[];
+};
+
+export async function fetchDashboards(limite = 8): Promise<DashboardsCampanha> {
+  const { data, error } = await supabase.rpc("campanhas_dashboards", { p_limite: limite });
+  if (error) throw error;
+  const d = (data ?? {}) as Partial<DashboardsCampanha>;
+  return {
+    imoveis_venda: d.imoveis_venda ?? [],
+    imoveis_locacao: d.imoveis_locacao ?? [],
+    bairros_venda: d.bairros_venda ?? [],
+    bairros_locacao: d.bairros_locacao ?? [],
+  };
+}
