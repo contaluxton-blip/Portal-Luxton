@@ -14,6 +14,7 @@ import {
   Check,
   Bookmark,
   BookmarkPlus,
+  Pencil,
   Trash2,
   X,
   Lock,
@@ -87,6 +88,7 @@ const VAZIO: Filtros = {
 type PerfilFiltro = {
   id: string;
   nome: string;
+  descricao?: string;
   padrao?: boolean;
   filtros: Filtros;
   criadoPorId?: string | null;
@@ -139,13 +141,15 @@ export default function Campanhas() {
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
-  // Usuário logado (para atribuir e autorizar exclusão de perfis salvos).
-  const { perfil: usuarioLogado, ehAdmin } = useAuth();
+  // Usuário logado (para atribuir e autorizar edição/exclusão de perfis salvos).
+  const { perfil: usuarioLogado, ehAdminGeral } = useAuth();
 
   // Perfis salvos (agora no banco, compartilhados pela equipe).
   const [perfisUsuario, setPerfisUsuario] = useState<PerfilFiltro[]>([]);
   const [modalPerfil, setModalPerfil] = useState(false);
   const [nomePerfil, setNomePerfil] = useState("");
+  const [descricaoPerfil, setDescricaoPerfil] = useState("");
+  const [editandoPerfil, setEditandoPerfil] = useState<PerfilFiltro | null>(null);
   const [salvandoPerfil, setSalvandoPerfil] = useState(false);
   const [confirmarPerfil, setConfirmarPerfil] = useState<PerfilFiltro | null>(null);
   const [perfilAtivo, setPerfilAtivo] = useState<string | null>(null);
@@ -188,7 +192,7 @@ export default function Campanhas() {
     let ativo = true;
     supabase
       .from("campanhas_perfis")
-      .select("id, nome, filtros, criado_por, criado_por_nome, criado_em")
+      .select("id, nome, descricao, filtros, criado_por, criado_por_nome, criado_em")
       .order("criado_em", { ascending: true })
       .then(({ data }) => {
         if (!ativo || !data) return;
@@ -196,6 +200,7 @@ export default function Campanhas() {
           data.map((d) => ({
             id: d.id as string,
             nome: d.nome as string,
+            descricao: (d.descricao as string) || "",
             filtros: comFiltros(d.filtros as Partial<Filtros>),
             criadoPorId: d.criado_por as string | null,
             criadoPorNome: (d.criado_por_nome as string) || "",
@@ -224,33 +229,67 @@ export default function Campanhas() {
     setPerfilAtivo(p.id);
   };
 
+  // Abre o modal para CRIAR um novo perfil (guarda os filtros atuais).
+  const abrirCriarPerfil = () => {
+    setEditandoPerfil(null);
+    setNomePerfil("");
+    setDescricaoPerfil("");
+    setModalPerfil(true);
+  };
+
+  // Abre o modal para EDITAR nome/descrição de um perfil existente.
+  const abrirEditarPerfil = (p: PerfilFiltro) => {
+    setEditandoPerfil(p);
+    setNomePerfil(p.nome);
+    setDescricaoPerfil(p.descricao || "");
+    setModalPerfil(true);
+  };
+
   const salvarPerfil = async () => {
     const nome = nomePerfil.trim();
+    const descricao = descricaoPerfil.trim();
     if (!nome || !usuarioLogado) return;
     setSalvandoPerfil(true);
     try {
-      const { data, error } = await supabase
-        .from("campanhas_perfis")
-        .insert({
-          nome,
-          filtros: rascunho,
-          criado_por: usuarioLogado.id,
-          criado_por_nome: usuarioLogado.nome || usuarioLogado.email,
-        })
-        .select("id, nome, filtros, criado_por, criado_por_nome, criado_em")
-        .single();
-      if (error) throw error;
-      const novo: PerfilFiltro = {
-        id: data.id,
-        nome: data.nome,
-        filtros: comFiltros(data.filtros as Partial<Filtros>),
-        criadoPorId: data.criado_por,
-        criadoPorNome: data.criado_por_nome || "",
-        criadoEm: data.criado_em,
-      };
-      setPerfisUsuario((lista) => [...lista, novo]);
-      setPerfilAtivo(novo.id);
+      if (editandoPerfil) {
+        // EDITAR: só altera nome e descrição (mantém os filtros salvos).
+        const { error } = await supabase
+          .from("campanhas_perfis")
+          .update({ nome, descricao })
+          .eq("id", editandoPerfil.id);
+        if (error) throw error;
+        setPerfisUsuario((lista) =>
+          lista.map((x) => (x.id === editandoPerfil.id ? { ...x, nome, descricao } : x))
+        );
+      } else {
+        // CRIAR: guarda os filtros atuais.
+        const { data, error } = await supabase
+          .from("campanhas_perfis")
+          .insert({
+            nome,
+            descricao,
+            filtros: rascunho,
+            criado_por: usuarioLogado.id,
+            criado_por_nome: usuarioLogado.nome || usuarioLogado.email,
+          })
+          .select("id, nome, descricao, filtros, criado_por, criado_por_nome, criado_em")
+          .single();
+        if (error) throw error;
+        const novo: PerfilFiltro = {
+          id: data.id,
+          nome: data.nome,
+          descricao: data.descricao || "",
+          filtros: comFiltros(data.filtros as Partial<Filtros>),
+          criadoPorId: data.criado_por,
+          criadoPorNome: data.criado_por_nome || "",
+          criadoEm: data.criado_em,
+        };
+        setPerfisUsuario((lista) => [...lista, novo]);
+        setPerfilAtivo(novo.id);
+      }
       setNomePerfil("");
+      setDescricaoPerfil("");
+      setEditandoPerfil(null);
       setModalPerfil(false);
     } catch (e) {
       setErro((e as Error)?.message ?? "Falha ao salvar o perfil.");
@@ -259,9 +298,9 @@ export default function Campanhas() {
     }
   };
 
-  // Só o criador ou um admin pode excluir um perfil salvo.
-  const podeExcluirPerfil = (p: PerfilFiltro) =>
-    !p.padrao && (ehAdmin || p.criadoPorId === usuarioLogado?.id);
+  // admin_geral gerencia (edita/exclui) qualquer perfil; os demais, só os seus.
+  const podeGerenciarPerfil = (p: PerfilFiltro) =>
+    !p.padrao && (ehAdminGeral || p.criadoPorId === usuarioLogado?.id);
 
   const excluirPerfil = async () => {
     const p = confirmarPerfil;
@@ -412,10 +451,7 @@ export default function Campanhas() {
               <Bookmark size={14} /> Perfis salvos
             </div>
             <button
-              onClick={() => {
-                setNomePerfil("");
-                setModalPerfil(true);
-              }}
+              onClick={abrirCriarPerfil}
               className="inline-flex items-center gap-1.5 border border-line-strong px-3 py-1.5 text-sm font-medium text-forest-900 transition hover:border-forest-900 hover:bg-green-soft"
             >
               <BookmarkPlus size={15} /> Salvar filtros atuais
@@ -448,20 +484,34 @@ export default function Campanhas() {
                       {p.padrao && <Lock size={12} className={ativo ? "text-white/80" : "text-neutral-400"} />}
                       {p.nome}
                     </span>
+                    {!p.padrao && p.descricao && (
+                      <span className={`max-w-[220px] truncate text-[11px] ${ativo ? "text-white/80" : "text-neutral-500"}`}>
+                        {p.descricao}
+                      </span>
+                    )}
                     {!p.padrao && legenda && (
                       <span className={`text-[10px] ${ativo ? "text-white/70" : "text-neutral-400"}`}>
                         {legenda}
                       </span>
                     )}
                   </button>
-                  {podeExcluirPerfil(p) && (
-                    <button
-                      onClick={() => setConfirmarPerfil(p)}
-                      title="Excluir perfil"
-                      className={ativo ? "text-white/80 hover:text-white" : "text-neutral-400 hover:text-red-600"}
-                    >
-                      <Trash2 size={13} />
-                    </button>
+                  {podeGerenciarPerfil(p) && (
+                    <>
+                      <button
+                        onClick={() => abrirEditarPerfil(p)}
+                        title="Editar perfil"
+                        className={ativo ? "text-white/80 hover:text-white" : "text-neutral-400 hover:text-forest-900"}
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        onClick={() => setConfirmarPerfil(p)}
+                        title="Excluir perfil"
+                        className={ativo ? "text-white/80 hover:text-white" : "text-neutral-400 hover:text-red-600"}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </>
                   )}
                 </span>
               );
@@ -971,7 +1021,7 @@ export default function Campanhas() {
           <div className="w-full max-w-md border border-line-strong bg-white shadow-xl">
             <div className="flex items-center justify-between border-b border-line-strong px-6 py-4">
               <h2 className="font-title text-lg font-semibold text-forest-900">
-                Salvar perfil de filtros
+                {editandoPerfil ? "Editar perfil" : "Salvar perfil de filtros"}
               </h2>
               <button
                 onClick={() => setModalPerfil(false)}
@@ -981,17 +1031,32 @@ export default function Campanhas() {
               </button>
             </div>
             <div className="space-y-3 px-6 py-5">
-              <label className="block text-xs font-medium text-neutral-600">Nome do perfil</label>
-              <input
-                className={inputCls}
-                autoFocus
-                placeholder="Ex.: Apartamentos Moinhos até R$ 2 mi"
-                value={nomePerfil}
-                onChange={(e) => setNomePerfil(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && salvarPerfil()}
-              />
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-neutral-600">Nome do perfil</label>
+                <input
+                  className={inputCls}
+                  autoFocus
+                  placeholder="Ex.: Apartamentos Moinhos até R$ 2 mi"
+                  value={nomePerfil}
+                  onChange={(e) => setNomePerfil(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && salvarPerfil()}
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-neutral-600">
+                  Descrição <span className="text-neutral-400">(opcional)</span>
+                </label>
+                <textarea
+                  className={`${inputCls} min-h-[72px] resize-y`}
+                  placeholder="Para que serve este segmento, quem usar, etc."
+                  value={descricaoPerfil}
+                  onChange={(e) => setDescricaoPerfil(e.target.value)}
+                />
+              </div>
               <p className="text-xs text-neutral-500">
-                Guarda os filtros exatamente como estão agora, para reaplicar depois com um clique.
+                {editandoPerfil
+                  ? "Edita o nome e a descrição. Os filtros salvos deste perfil não mudam."
+                  : "Guarda os filtros exatamente como estão agora, para reaplicar depois com um clique."}
               </p>
             </div>
             <div className="flex items-center justify-end gap-3 border-t border-line-strong px-6 py-4">
@@ -1006,7 +1071,8 @@ export default function Campanhas() {
                 disabled={!nomePerfil.trim() || salvandoPerfil}
                 className="inline-flex items-center gap-2 bg-forest-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-forest-800 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {salvandoPerfil ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Salvar perfil
+                {salvandoPerfil ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{" "}
+                {editandoPerfil ? "Salvar alterações" : "Salvar perfil"}
               </button>
             </div>
           </div>
