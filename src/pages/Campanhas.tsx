@@ -17,7 +17,6 @@ import {
   Pencil,
   Trash2,
   X,
-  Lock,
   Loader2,
   AlertTriangle,
 } from "lucide-react";
@@ -89,7 +88,6 @@ type PerfilFiltro = {
   id: string;
   nome: string;
   descricao?: string;
-  padrao?: boolean;
   filtros: Filtros;
   criadoPorId?: string | null;
   criadoPorNome?: string;
@@ -97,27 +95,6 @@ type PerfilFiltro = {
 };
 
 const comFiltros = (parcial: Partial<Filtros>): Filtros => ({ ...VAZIO, ...parcial });
-
-const PERFIS_PADRAO: PerfilFiltro[] = [
-  {
-    id: "pad-alto-padrao",
-    nome: "Alto padrão · acima de R$ 3 mi",
-    padrao: true,
-    filtros: comFiltros({ finalidade: "venda", precoMin: "3000000" }),
-  },
-  {
-    id: "pad-apartamentos",
-    nome: "Apartamentos à venda",
-    padrao: true,
-    filtros: comFiltros({ finalidade: "venda", tipos: ["Apartamento"] }),
-  },
-  {
-    id: "pad-disponiveis",
-    nome: "Disponíveis para venda",
-    padrao: true,
-    filtros: comFiltros({ finalidade: "venda", statusImovel: ["VENDA", "VENDA E ALUGUEL"] }),
-  },
-];
 
 // Estilo dos campos de filtro. Preenchido = borda/fundo mais fortes (verde) para
 // destacar o que já foi escolhido; vazio = clarinho, para não confundir.
@@ -155,7 +132,7 @@ export default function Campanhas() {
   const [perfilAtivo, setPerfilAtivo] = useState<string | null>(null);
   const [copiado, setCopiado] = useState(false);
   const [baixando, setBaixando] = useState<null | "csv" | "copia">(null);
-  const perfis = [...PERFIS_PADRAO, ...perfisUsuario];
+  const perfis = perfisUsuario;
 
   // Carrega os valores dos filtros (bairros, categorias, status, origens).
   useEffect(() => {
@@ -300,7 +277,7 @@ export default function Campanhas() {
 
   // admin_geral gerencia (edita/exclui) qualquer perfil; os demais, só os seus.
   const podeGerenciarPerfil = (p: PerfilFiltro) =>
-    !p.padrao && (ehAdminGeral || p.criadoPorId === usuarioLogado?.id);
+    ehAdminGeral || p.criadoPorId === usuarioLogado?.id;
 
   const excluirPerfil = async () => {
     const p = confirmarPerfil;
@@ -480,16 +457,13 @@ export default function Campanhas() {
                     className="flex flex-col items-start text-left"
                     title="Carregar este perfil"
                   >
-                    <span className="inline-flex items-center gap-1.5">
-                      {p.padrao && <Lock size={12} className={ativo ? "text-white/80" : "text-neutral-400"} />}
-                      {p.nome}
-                    </span>
-                    {!p.padrao && p.descricao && (
+                    <span className="inline-flex items-center gap-1.5">{p.nome}</span>
+                    {p.descricao && (
                       <span className={`max-w-[220px] truncate text-[11px] ${ativo ? "text-white/80" : "text-neutral-500"}`}>
                         {p.descricao}
                       </span>
                     )}
-                    {!p.padrao && legenda && (
+                    {legenda && (
                       <span className={`text-[10px] ${ativo ? "text-white/70" : "text-neutral-400"}`}>
                         {legenda}
                       </span>
