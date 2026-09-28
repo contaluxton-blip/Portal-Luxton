@@ -459,22 +459,22 @@ export default function Campanhas() {
           />
           <BarChartCard
             titulo="Bairros mais procurados"
-            tag="Locação"
+            tag="Venda"
             icon={MapPin}
-            cor="#b78227"
+            cor="#2FA35A"
             carregando={!dashboards}
-            itens={(dashboards?.bairros_locacao ?? []).map((d) => ({
+            itens={(dashboards?.bairros_venda ?? []).map((d) => ({
               label: d.bairro,
               total: d.total,
             }))}
           />
           <BarChartCard
             titulo="Bairros mais procurados"
-            tag="Venda"
+            tag="Locação"
             icon={MapPin}
-            cor="#2FA35A"
+            cor="#b78227"
             carregando={!dashboards}
-            itens={(dashboards?.bairros_venda ?? []).map((d) => ({
+            itens={(dashboards?.bairros_locacao ?? []).map((d) => ({
               label: d.bairro,
               total: d.total,
             }))}
