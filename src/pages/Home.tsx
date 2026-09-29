@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Megaphone, Users, ArrowRight, LogOut, Lock, BarChart3, ExternalLink } from "lucide-react";
 import { LuxtonMark, LuxtonWordmark } from "../components/Logo";
 import { useAuth, PAPEL_LABEL } from "../lib/auth";
+import { registrarLog, type TipoLogCliente } from "../lib/logs";
 
 type Modulo = {
   titulo: string;
@@ -9,6 +10,7 @@ type Modulo = {
   icon: typeof Megaphone;
   to?: string; // rota interna
   href?: string; // link externo (abre em nova aba)
+  logAoAbrir?: TipoLogCliente; // registra no log quando o card é clicado
   liberado: boolean;
 };
 
@@ -28,6 +30,7 @@ export default function Home() {
       subtitulo: "Painel de locações (abre no Google Sites).",
       icon: BarChart3,
       href: "https://sites.google.com/luxtonimoveis.com.br/dashboardv2/dashboard-loca%C3%A7%C3%A3o",
+      logAoAbrir: "entrou_dashboard_locacoes",
       liberado: podeCampanhas,
     },
     {
@@ -121,7 +124,13 @@ function ModuloCard({ m }: { m: Modulo }) {
 
   if (externo) {
     return (
-      <a href={m.href} target="_blank" rel="noopener noreferrer" className="block">
+      <a
+        href={m.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="block"
+        onClick={() => m.logAoAbrir && registrarLog(m.logAoAbrir)}
+      >
         {conteudo}
       </a>
     );

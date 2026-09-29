@@ -53,6 +53,13 @@ export function SomenteAdmin({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+export function SomenteAdminGeral({ children }: { children: React.ReactNode }) {
+  const { ehAdminGeral, perfil, carregando } = useAuth();
+  if (carregando || !perfil) return <Carregando />;
+  if (!ehAdminGeral) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
 export function SomenteCampanhas({ children }: { children: React.ReactNode }) {
   const { podeCampanhas, perfil, carregando } = useAuth();
   if (carregando || !perfil) return <Carregando />;

@@ -27,6 +27,7 @@ import { MultiSelect, Chips, FonteFlags } from "../components/MultiSelect";
 import { brl, num, dataBR } from "../lib/format";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
+import { registrarLog } from "../lib/logs";
 import {
   fetchCampanha,
   fetchFacets,
@@ -111,6 +112,41 @@ const inputCls = campoCls(false);
 
 const dataEntradaBR = (iso: string | null) => (iso ? dataBR(iso.slice(0, 10)) : "");
 
+const FINALIDADE_LABEL: Record<Finalidade, string> = {
+  venda: "Venda",
+  locacao: "Locação",
+  ambos: "Venda e locação",
+};
+
+// Resume os filtros preenchidos em frases curtas, para o log de atividade.
+function descreverFiltros(f: Filtros): string[] {
+  const l: string[] = [];
+  l.push(
+    f.exigirImovel
+      ? `Imóvel relacionado: exigir (${FINALIDADE_LABEL[f.finalidade]})`
+      : "Imóvel relacionado: não exigir"
+  );
+  if (f.sistemas.length) l.push(`Fonte: ${f.sistemas.map((s) => SISTEMA_LABEL[s] ?? s).join(", ")}`);
+  if (f.bairros.length) l.push(`Bairro: ${f.bairros.join(", ")}`);
+  if (f.tipos.length) l.push(`Tipo: ${f.tipos.join(", ")}`);
+  if (f.precoMin) l.push(`Preço mín: ${brl(Number(f.precoMin))}`);
+  if (f.precoMax) l.push(`Preço máx: ${brl(Number(f.precoMax))}`);
+  if (f.metragemMin) l.push(`Metragem mín: ${f.metragemMin} m²`);
+  if (f.metragemMax) l.push(`Metragem máx: ${f.metragemMax} m²`);
+  if (f.quartosMin) l.push(`Quartos: ${f.quartosMin}+`);
+  if (f.vagasMin) l.push(`Vagas: ${f.vagasMin}+`);
+  if (f.codigoImovel) l.push(`Código do imóvel: ${f.codigoImovel}`);
+  if (f.statusImovel.length) l.push(`Status do imóvel: ${f.statusImovel.join(", ")}`);
+  if (f.dataInicial) l.push(`Entrada de: ${f.dataInicial}`);
+  if (f.dataFinal) l.push(`Entrada até: ${f.dataFinal}`);
+  if (f.canais.length) l.push(`Canal: ${f.canais.join(", ")}`);
+  if (f.statusNegocio.length) l.push(`Status do negócio: ${f.statusNegocio.join(", ")}`);
+  if (f.fases.length) l.push(`Fase: ${f.fases.join(", ")}`);
+  if (f.corretores.length) l.push(`Corretor: ${f.corretores.join(", ")}`);
+  if (f.diasSemAtividade) l.push(`Negócio parado há +${f.diasSemAtividade} dias`);
+  return l;
+}
+
 export default function Campanhas() {
   const [rascunho, setRascunho] = useState<Filtros>(VAZIO);
   const [aplicado, setAplicado] = useState<Filtros | null>(null);
@@ -151,6 +187,11 @@ export default function Campanhas() {
     fetchDashboards().then(setDashboards).catch(() => {});
   }, []);
 
+  // Log: entrou na tela de Campanhas.
+  useEffect(() => {
+    registrarLog("entrou_campanhas");
+  }, []);
+
   // Busca no Supabase sempre que os filtros aplicados mudam.
   useEffect(() => {
     if (!aplicado) {
@@ -162,7 +203,14 @@ export default function Campanhas() {
     setCarregando(true);
     setErro(null);
     fetchCampanha(aplicado)
-      .then((r) => ativo && setResultado(r))
+      .then((r) => {
+        if (!ativo) return;
+        setResultado(r);
+        registrarLog("aplicou_filtros", {
+          filtros: descreverFiltros(aplicado),
+          total_leads: r.totalLeads,
+        });
+      })
       .catch((e) => {
         if (!ativo) return;
         setErro(e?.message ?? "Erro ao consultar a base.");
@@ -248,6 +296,7 @@ export default function Campanhas() {
         setPerfisUsuario((lista) =>
           lista.map((x) => (x.id === editandoPerfil.id ? { ...x, nome, descricao } : x))
         );
+        registrarLog("perfil_editado", { perfil: nome });
       } else {
         // CRIAR: guarda os filtros atuais.
         const { data, error } = await supabase
@@ -273,6 +322,7 @@ export default function Campanhas() {
         };
         setPerfisUsuario((lista) => [...lista, novo]);
         setPerfilAtivo(novo.id);
+        registrarLog("perfil_salvo", { perfil: nome, filtros: descreverFiltros(rascunho) });
       }
       setNomePerfil("");
       setDescricaoPerfil("");
@@ -298,6 +348,7 @@ export default function Campanhas() {
       if (error) throw error;
       setPerfisUsuario((lista) => lista.filter((x) => x.id !== p.id));
       setPerfilAtivo((atual) => (atual === p.id ? null : atual));
+      registrarLog("perfil_excluido", { perfil: p.nome });
     } catch (e) {
       setErro((e as Error)?.message ?? "Falha ao excluir o perfil.");
     }
@@ -339,6 +390,7 @@ export default function Campanhas() {
     try {
       const todos = await fetchTodosLeads(aplicado);
       exportarCSV(todos, aplicado.finalidade);
+      registrarLog("exportou_planilha", { leads: todos.length, filtros: descreverFiltros(aplicado) });
     } catch (e) {
       setErro((e as Error)?.message ?? "Falha ao exportar a lista.");
     } finally {
@@ -367,6 +419,10 @@ export default function Campanhas() {
       }
       setCopiado(true);
       setTimeout(() => setCopiado(false), 2000);
+      registrarLog("copiou_numeros", {
+        numeros: todos.filter((g) => g.telefone).length,
+        filtros: descreverFiltros(aplicado),
+      });
     } catch (e) {
       setErro((e as Error)?.message ?? "Falha ao copiar os números.");
     } finally {

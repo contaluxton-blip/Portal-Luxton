@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
+import { registrarLog } from "./logs";
 
 export type Papel = "admin_geral" | "admin" | "geral";
 
@@ -67,6 +68,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             () => {},
             () => {}
           );
+          // O banco ignora repetições em 30 min (SIGNED_IN volta ao reabrir a aba).
+          registrarLog("login");
         }
       } else {
         setPerfil(null);

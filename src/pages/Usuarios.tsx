@@ -14,10 +14,12 @@ import {
   Check,
   Loader2,
   ShieldCheck,
+  ScrollText,
 } from "lucide-react";
 import { LuxtonMark } from "../components/Logo";
 import { supabase } from "../lib/supabase";
 import { useAuth, PAPEL_LABEL, type Papel } from "../lib/auth";
+import { registrarLog } from "../lib/logs";
 
 const inputCls =
   "w-full border border-line-strong bg-white px-3 py-2 text-sm text-neutral-800 transition placeholder:text-neutral-400 hover:border-forest-900 focus:border-green-accent focus:outline-none";
@@ -98,7 +100,16 @@ export default function Usuarios() {
 
   useEffect(() => {
     carregar();
+    registrarLog("entrou_usuarios");
   }, []);
+
+  // Log de busca: só depois de 1,2s sem digitar (evita um log por letra).
+  useEffect(() => {
+    const termo = busca.trim();
+    if (termo.length < 2) return;
+    const t = setTimeout(() => registrarLog("buscou_usuario", { termo }), 1200);
+    return () => clearTimeout(t);
+  }, [busca]);
 
   const filtrados = useMemo(() => {
     const q = busca.trim().toLowerCase();
@@ -238,12 +249,22 @@ export default function Usuarios() {
               className={`${inputCls} pl-9`}
             />
           </div>
-          <button
-            onClick={abrirNovo}
-            className="inline-flex items-center gap-2 bg-forest-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-forest-800"
-          >
-            <UserPlus size={16} /> Adicionar usuário
-          </button>
+          <div className="flex items-center gap-3">
+            {ehAdminGeral && (
+              <Link
+                to="/usuarios/logs"
+                className="inline-flex items-center gap-2 border border-line-strong bg-white px-4 py-2.5 text-sm font-medium text-forest-900 transition hover:border-forest-900 hover:bg-green-soft"
+              >
+                <ScrollText size={16} /> Ver logs
+              </Link>
+            )}
+            <button
+              onClick={abrirNovo}
+              className="inline-flex items-center gap-2 bg-forest-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-forest-800"
+            >
+              <UserPlus size={16} /> Adicionar usuário
+            </button>
+          </div>
         </div>
 
         <section className="mt-4 overflow-hidden border border-line-strong bg-white">

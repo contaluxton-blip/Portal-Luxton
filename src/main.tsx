@@ -8,7 +8,8 @@ import Usuarios from "./pages/Usuarios";
 import Login from "./pages/Login";
 import DefinirSenha from "./pages/DefinirSenha";
 import { AuthProvider } from "./lib/auth";
-import { Protegido, SomenteAdmin, SomenteCampanhas } from "./components/rotas";
+import Logs from "./pages/Logs";
+import { Protegido, SomenteAdmin, SomenteAdminGeral, SomenteCampanhas } from "./components/rotas";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
@@ -42,6 +43,16 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 <SomenteAdmin>
                   <Usuarios />
                 </SomenteAdmin>
+              </Protegido>
+            }
+          />
+          <Route
+            path="/usuarios/logs"
+            element={
+              <Protegido>
+                <SomenteAdminGeral>
+                  <Logs />
+                </SomenteAdminGeral>
               </Protegido>
             }
           />
