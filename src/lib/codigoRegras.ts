@@ -31,7 +31,7 @@ export function acharCodigoNoTexto(texto: string, cfg: ConfigCodigo): { codigo: 
   const alt = cfg.palavras.map(palavraParaRegex).filter(Boolean);
   if (alt.length) {
     const re = new RegExp(
-      `(?<![\\p{L}\\p{N}])(?:${alt.join("|")})\\.?\\s*:?\\s*(?:n[º°]\\s*)?(\\d{4,6})`,
+      `(?<![\\p{L}\\p{N}])(?:${alt.join("|")})[*_~]*\\.?\\s*[*_~]*:?\\s*[*_~]*\\s*(?:n[º°]\\s*)?(\\d{4,6})`,
       "iu"
     );
     const m = re.exec(texto);
