@@ -35,6 +35,7 @@ import { brl, num, dataBR } from "../lib/format";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
 import { registrarLog } from "../lib/logs";
+import { AtualizacaoDados } from "../components/AtualizacaoDados";
 import { formatarTelefone, telefoneParaCopia } from "../lib/telefone";
 import {
   fetchCampanha,
@@ -212,18 +213,20 @@ export default function Campanhas() {
   const [numerosModal, setNumerosModal] = useState<string | null>(null);
   const [baixando, setBaixando] = useState<null | "csv" | "copia">(null);
   const perfis = perfisUsuario;
+  // Sobe quando uma atualização geral termina: recarrega filtros, gráficos e a lista.
+  const [versaoDados, setVersaoDados] = useState(0);
 
   // Carrega os valores dos filtros (bairros, categorias, status, origens).
   useEffect(() => {
     fetchFacets()
       .then(setFacets)
       .catch((e) => setErro(e?.message ?? "Falha ao carregar os filtros."));
-  }, []);
+  }, [versaoDados]);
 
   // Carrega os agregados dos gráficos do topo (silencioso se falhar).
   useEffect(() => {
     fetchDashboards().then(setDashboards).catch(() => {});
-  }, []);
+  }, [versaoDados]);
 
   // Log: entrou na tela de Campanhas.
   useEffect(() => {
@@ -262,7 +265,7 @@ export default function Campanhas() {
     return () => {
       ativo = false;
     };
-  }, [aplicado, ordem, buscaAplicada]);
+  }, [aplicado, ordem, buscaAplicada, versaoDados]);
 
   // A busca espera o usuário parar de digitar.
   useEffect(() => {
@@ -584,6 +587,7 @@ export default function Campanhas() {
             </div>
           </Link>
           <div className="flex items-center gap-1">
+            <AtualizacaoDados onConcluida={() => setVersaoDados((v) => v + 1)} />
             {ehAdmin && (
               <Link
                 to="/campanhas/configuracoes"
