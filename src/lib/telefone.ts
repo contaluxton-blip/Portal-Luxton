@@ -41,3 +41,11 @@ export function telefoneParaCopia(raw?: string | null): string {
   if (t.tipo === "sem_ddd") return t.numero;
   return `+${t.digitos}`;
 }
+
+// Chave única do telefone (igual à função tel_chave do banco): só dígitos, sem zeros à esquerda e sem o 55 do país.
+// "+55|51992004129", "51 99200.4129" e "(51) 99200-4129" dão a mesma chave. Menos de 8 dígitos = sem chave.
+export function chaveTelefone(raw?: string | null): string | null {
+  let z = (raw ?? "").replace(/\D/g, "").replace(/^0+/, "");
+  if ((z.length === 12 || z.length === 13) && z.startsWith("55")) z = z.slice(2);
+  return z.length >= 8 ? z : null;
+}

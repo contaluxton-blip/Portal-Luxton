@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { AlertTriangle, ArrowLeft, Loader2, Pencil, Plus, Search, Settings, Trash2, X } from "lucide-react";
 import { LuxtonMark } from "../components/Logo";
 import { EditorTemplate } from "../components/EditorTemplate";
+import { AbasConfig } from "../components/AbasConfig";
 import { registrarLog } from "../lib/logs";
 import { num, dataBR } from "../lib/format";
 import {
@@ -155,6 +156,7 @@ export default function ConfigTemplates() {
       </div>
 
       <div className="mx-auto max-w-[1600px] px-6 py-8">
+        <AbasConfig atual="templates" />
         <p className="mb-5 max-w-4xl text-sm text-neutral-600">
           Defina de quais mensagens do RealMate sai o <strong>interesse do lead por um imóvel</strong>. Cada
           template tem regras para achar o código do imóvel; você pode testar com mensagens reais antes de ativar

@@ -10,6 +10,7 @@ import DefinirSenha from "./pages/DefinirSenha";
 import { AuthProvider } from "./lib/auth";
 import Logs from "./pages/Logs";
 import ConfigTemplates from "./pages/ConfigTemplates";
+import ConfigListas from "./pages/ConfigListas";
 import { Protegido, SomenteAdmin, SomenteAdminGeral, SomenteCampanhas } from "./components/rotas";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
@@ -43,6 +44,16 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               <Protegido>
                 <SomenteAdmin>
                   <ConfigTemplates />
+                </SomenteAdmin>
+              </Protegido>
+            }
+          />
+          <Route
+            path="/campanhas/configuracoes/listas"
+            element={
+              <Protegido>
+                <SomenteAdmin>
+                  <ConfigListas />
                 </SomenteAdmin>
               </Protegido>
             }

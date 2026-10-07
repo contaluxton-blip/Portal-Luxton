@@ -26,6 +26,7 @@ import {
   ArrowDown,
   ArrowUpDown,
   Search,
+  Ban,
 } from "lucide-react";
 import { LuxtonMark } from "../components/Logo";
 import { MultiSelect, Chips, FonteFlags } from "../components/MultiSelect";
@@ -36,7 +37,8 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
 import { registrarLog } from "../lib/logs";
 import { AtualizacaoDados } from "../components/AtualizacaoDados";
-import { formatarTelefone, telefoneParaCopia } from "../lib/telefone";
+import { chaveTelefone, formatarTelefone, telefoneParaCopia } from "../lib/telefone";
+import { adicionarIgnorados, chavesIgnoradas } from "../lib/ignoradosApi";
 import {
   fetchCampanha,
   fetchFacets,
@@ -114,9 +116,11 @@ type PerfilFiltro = {
   criadoEm?: string;
 };
 
-// Seleção de leads para copiar/exportar: começa com TODOS marcados; as exceções guardam só o que o usuário mudou.
-type Selecao = { modo: "todos" | "nenhum"; excecoes: Set<string> };
-const todosMarcados = (): Selecao => ({ modo: "todos", excecoes: new Set() });
+// Seleção de leads para copiar/exportar. Padrão: todos marcados, MENOS os contatos da lista de ignorados.
+// "todos" marca até os ignorados; "nenhum" desmarca tudo. As exceções guardam só o que o usuário inverteu.
+type Selecao = { modo: "padrao" | "todos" | "nenhum"; excecoes: Set<string> };
+const selecaoPadrao = (): Selecao => ({ modo: "padrao", excecoes: new Set() });
+const todosMarcados = selecaoPadrao;
 
 const comFiltros = (salvos: FiltrosSalvos): Filtros => {
   const { statusNegocio, fases, corretores, diasSemAtividade, ...resto } = salvos;
@@ -187,6 +191,13 @@ export default function Campanhas() {
   const [ordem, setOrdem] = useState<Ordem | null>(null);
   const ultimoLog = useRef<Filtros | null>(null);
   const [selecao, setSelecao] = useState<Selecao>(todosMarcados);
+  // Lista de contatos ignorados: chaves de telefone + quais leads do filtro atual estão nela.
+  const [ignChaves, setIgnChaves] = useState<Set<string> | null>(null);
+  const [ignIds, setIgnIds] = useState<Set<string>>(new Set());
+  const [ignPronto, setIgnPronto] = useState(false);
+  const [ignorarAlvo, setIgnorarAlvo] = useState<LeadGrupo | null>(null);
+  const [ignorarMotivo, setIgnorarMotivo] = useState("");
+  const [ignorando, setIgnorando] = useState(false);
   const [busca, setBusca] = useState("");
   const [buscaAplicada, setBuscaAplicada] = useState("");
 
@@ -227,6 +238,46 @@ export default function Campanhas() {
   useEffect(() => {
     fetchDashboards().then(setDashboards).catch(() => {});
   }, [versaoDados]);
+
+  // Lista de ignorados (telefones).
+  useEffect(() => {
+    chavesIgnoradas().then(setIgnChaves).catch(() => setIgnChaves(new Set()));
+  }, [versaoDados]);
+
+  // Quais leads do filtro (todos, não só os 1.000 da tela) estão na lista de ignorados.
+  useEffect(() => {
+    if (!aplicado) {
+      setIgnIds(new Set());
+      setIgnPronto(false);
+      return;
+    }
+    if (ignChaves === null) {
+      setIgnPronto(false);
+      return;
+    }
+    if (ignChaves.size === 0) {
+      setIgnIds(new Set());
+      setIgnPronto(true);
+      return;
+    }
+    let ativo = true;
+    setIgnPronto(false);
+    fetchTelefones({ ...aplicado })
+      .then((lista) => {
+        if (!ativo) return;
+        const ids = new Set<string>();
+        for (const [idLead, t] of lista) {
+          const k = chaveTelefone(t);
+          if (k && ignChaves.has(k)) ids.add(idLead);
+        }
+        setIgnIds(ids);
+        setIgnPronto(true);
+      })
+      .catch(() => ativo && setIgnPronto(true));
+    return () => {
+      ativo = false;
+    };
+  }, [aplicado, ignChaves, versaoDados]);
 
   // Log: entrou na tela de Campanhas.
   useEffect(() => {
@@ -442,7 +493,19 @@ export default function Campanhas() {
   const grupos = resultado?.grupos ?? [];
 
   // ---- seleção de leads (vale para copiar números e exportar planilha) ----
-  const estaMarcado = (id: string) => (selecao.modo === "todos" ? !selecao.excecoes.has(id) : selecao.excecoes.has(id));
+  // Ignorados: os do filtro todo (ignIds) + os que aparecem na tela com telefone da lista (já na primeira pintura).
+  const ignorados = useMemo(() => {
+    const n = new Set(ignIds);
+    if (ignChaves && ignChaves.size > 0) {
+      for (const g of grupos) {
+        const k = chaveTelefone(g.telefone);
+        if (k && ignChaves.has(k)) n.add(g.id);
+      }
+    }
+    return n;
+  }, [ignIds, ignChaves, grupos]);
+  const baseMarcado = (id: string) => (selecao.modo === "padrao" ? !ignorados.has(id) : selecao.modo === "todos");
+  const estaMarcado = (id: string) => baseMarcado(id) !== selecao.excecoes.has(id);
   const alternarLead = (id: string) =>
     setSelecao((s) => {
       const n = new Set(s.excecoes);
@@ -454,15 +517,18 @@ export default function Campanhas() {
   const marcarVisiveis = (marcar: boolean) =>
     setSelecao((s) => {
       const n = new Set(s.excecoes);
-      const vaiParaExcecao = s.modo === "todos" ? !marcar : marcar;
       for (const g of grupos) {
-        if (vaiParaExcecao) n.add(g.id);
+        const base = s.modo === "padrao" ? !ignorados.has(g.id) : s.modo === "todos";
+        if (base !== marcar) n.add(g.id);
         else n.delete(g.id);
       }
       return { ...s, excecoes: n };
     });
-  const selecionados =
-    selecao.modo === "todos" ? Math.max(0, resumo.totalLeads - selecao.excecoes.size) : selecao.excecoes.size;
+  const selecionados = (() => {
+    let n = selecao.modo === "padrao" ? resumo.totalLeads - ignorados.size : selecao.modo === "todos" ? resumo.totalLeads : 0;
+    for (const id of selecao.excecoes) n += baseMarcado(id) ? -1 : 1;
+    return Math.max(0, n);
+  })();
   const visiveisMarcados = grupos.filter((g) => estaMarcado(g.id)).length;
   const todosVisiveisMarcados = grupos.length > 0 && visiveisMarcados === grupos.length;
 
@@ -1067,7 +1133,7 @@ export default function Campanhas() {
             <div className="flex flex-wrap items-center gap-3">
               <button
                 onClick={copiarNumeros}
-                disabled={selecionados === 0 || baixando !== null}
+                disabled={selecionados === 0 || baixando !== null || !ignPronto}
                 className="inline-flex items-center gap-2 border border-forest-900 px-4 py-2.5 text-sm font-medium text-forest-900 transition hover:bg-green-soft disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {baixando === "copia" ? (
@@ -1086,7 +1152,7 @@ export default function Campanhas() {
               </button>
               <button
                 onClick={exportar}
-                disabled={selecionados === 0 || baixando !== null}
+                disabled={selecionados === 0 || baixando !== null || !ignPronto}
                 className="inline-flex items-center gap-2 bg-green-accent px-4 py-2.5 text-sm font-medium text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {baixando === "csv" ? (
@@ -1110,8 +1176,9 @@ export default function Campanhas() {
                 </span>
                 <button
                   type="button"
-                  onClick={() => setSelecao(todosMarcados())}
+                  onClick={() => setSelecao({ modo: "todos", excecoes: new Set() })}
                   className="text-xs font-medium text-forest-900 underline-offset-2 hover:underline"
+                  title={ignorados.size > 0 ? "Marca todos, inclusive os contatos ignorados" : undefined}
                 >
                   Marcar todos
                 </button>
@@ -1122,6 +1189,21 @@ export default function Campanhas() {
                 >
                   Desmarcar todos
                 </button>
+                {ignorados.size > 0 && (selecao.modo !== "padrao" || selecao.excecoes.size > 0) && (
+                  <button
+                    type="button"
+                    onClick={() => setSelecao(selecaoPadrao())}
+                    className="text-xs font-medium text-forest-900 underline-offset-2 hover:underline"
+                    title="Todos marcados, menos os contatos ignorados"
+                  >
+                    Restaurar seleção padrão
+                  </button>
+                )}
+                {ignorados.size > 0 && (
+                  <span className="inline-flex items-center gap-1 text-xs text-neutral-500">
+                    <Ban size={12} /> {num(ignorados.size)} contato(s) ignorado(s) {ignorados.size === 1 ? "veio" : "vieram"} desmarcado(s)
+                  </span>
+                )}
               </div>
               <div className="relative ml-auto w-full max-w-sm">
                 <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
@@ -1207,10 +1289,34 @@ export default function Campanhas() {
                       />
                     </td>
                     <td className="px-4 py-4">
-                      <div className="font-medium text-neutral-800">{g.nome}</div>
+                      <div className="flex items-center gap-1.5 font-medium text-neutral-800">
+                        {g.nome}
+                        {ehAdmin && g.telefone && !ignorados.has(g.id) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIgnorarMotivo("");
+                              setIgnorarAlvo(g);
+                            }}
+                            title="Ignorar este contato daqui para frente (lista de contatos ignorados)"
+                            aria-label={`Ignorar ${g.nome}`}
+                            className="text-neutral-300 transition hover:text-red-600"
+                          >
+                            <Ban size={13} />
+                          </button>
+                        )}
+                      </div>
                       {g.email && <div className="text-xs text-neutral-400">{g.email}</div>}
-                      {g.sistemas.length > 0 && (
+                      {(g.sistemas.length > 0 || ignorados.has(g.id)) && (
                         <div className="mt-1 flex flex-wrap gap-1">
+                          {ignorados.has(g.id) && (
+                            <span
+                              className="inline-flex items-center gap-1 bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-700 ring-1 ring-inset ring-red-600/20"
+                              title="Está na lista de contatos ignorados (Configurações)"
+                            >
+                              <Ban size={10} /> Ignorado
+                            </span>
+                          )}
                           {g.sistemas.map((s) => (
                             <span
                               key={s}
@@ -1371,6 +1477,68 @@ export default function Campanhas() {
               >
                 {salvandoPerfil ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}{" "}
                 {editandoPerfil ? "Salvar alterações" : "Salvar perfil"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: ignorar um contato (lista de contatos ignorados) */}
+      {ignorarAlvo && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md border border-line-strong bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-line-strong px-6 py-4">
+              <h2 className="font-title text-lg font-semibold text-forest-900">Ignorar este contato?</h2>
+              <button onClick={() => setIgnorarAlvo(null)} className="text-neutral-400 transition hover:text-neutral-700" aria-label="Fechar">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="space-y-3 px-6 py-5 text-sm text-neutral-700">
+              <p>
+                <strong>{ignorarAlvo.nome}</strong> ({formatarTelefone(ignorarAlvo.telefone)}) entra na lista de contatos
+                ignorados. Daqui para frente ele <strong>continua aparecendo</strong> em todas as campanhas, mas já vem
+                <strong> desmarcado</strong>. Dá para tirar da lista em Configurações &gt; Listas de contatos.
+              </p>
+              <input
+                className={`${inputBase} border-line bg-white text-neutral-800 hover:border-forest-900`}
+                value={ignorarMotivo}
+                onChange={(e) => setIgnorarMotivo(e.target.value)}
+                placeholder="Motivo (opcional)"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-line-strong px-6 py-4">
+              <button
+                onClick={() => setIgnorarAlvo(null)}
+                disabled={ignorando}
+                className="border border-line-strong px-4 py-2 text-sm font-medium text-neutral-700 transition hover:bg-neutral-100 disabled:opacity-40"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={async () => {
+                  setIgnorando(true);
+                  setErro(null);
+                  try {
+                    await adicionarIgnorados([{ telefone: ignorarAlvo.telefone, nome: ignorarAlvo.nome }], ignorarMotivo);
+                    setIgnChaves(await chavesIgnoradas());
+                    // volta a seguir a regra padrão para este lead (agora ignorado, vem desmarcado)
+                    setSelecao((sel) => {
+                      const n = new Set(sel.excecoes);
+                      n.delete(ignorarAlvo.id);
+                      return { ...sel, excecoes: n };
+                    });
+                    setIgnorarAlvo(null);
+                  } catch (e) {
+                    setErro((e as Error)?.message ?? "Falha ao ignorar o contato.");
+                    setIgnorarAlvo(null);
+                  } finally {
+                    setIgnorando(false);
+                  }
+                }}
+                disabled={ignorando}
+                className="inline-flex items-center gap-2 bg-red-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-700 disabled:opacity-40"
+              >
+                {ignorando ? <Loader2 size={15} className="animate-spin" /> : <Ban size={15} />} Sim, ignorar
               </button>
             </div>
           </div>

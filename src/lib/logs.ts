@@ -28,7 +28,9 @@ export type TipoLogServidor =
   | "template_retroativo"
   | "template_retroativo_concluido"
   | "campanhas_atualizadas"
-  | "atualizacao_geral";
+  | "atualizacao_geral"
+  | "ignorados_adicionados"
+  | "ignorados_removidos";
 
 export type TipoLog = TipoLogCliente | TipoLogServidor;
 
@@ -52,6 +54,8 @@ export const LOG_TIPOS: { tipo: TipoLog; label: string; cor: string }[] = [
   { tipo: "template_retroativo_concluido", label: "Concluiu interesse retroativo", cor: "bg-indigo-50 text-indigo-700 ring-indigo-600/20" },
   { tipo: "template_excluido", label: "Excluiu template", cor: "bg-red-50 text-red-700 ring-red-600/20" },
   { tipo: "campanhas_atualizadas", label: "Atualizou os dados de Campanhas", cor: "bg-indigo-50 text-indigo-700 ring-indigo-600/20" },
+  { tipo: "ignorados_adicionados", label: "Adicionou contatos à lista de ignorados", cor: "bg-indigo-50 text-indigo-700 ring-indigo-600/20" },
+  { tipo: "ignorados_removidos", label: "Removeu contatos da lista de ignorados", cor: "bg-indigo-50 text-indigo-700 ring-indigo-600/20" },
   { tipo: "atualizacao_geral", label: "Atualizou todos os dados (Vista + RealMate)", cor: "bg-indigo-50 text-indigo-700 ring-indigo-600/20" },
   { tipo: "usuario_criado", label: "Criou usuário", cor: "bg-amber-50 text-amber-700 ring-amber-600/20" },
   { tipo: "usuario_reativado", label: "Reativou usuário", cor: "bg-amber-50 text-amber-700 ring-amber-600/20" },
