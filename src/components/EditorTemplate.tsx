@@ -186,6 +186,7 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
   const [estimativa, setEstimativa] = useState<{ sessoes: number; minutos: number; soAnuncios: boolean } | null>(null);
   const [job, setJob] = useState<JobRetro | null>(null);
   const [iniciando, setIniciando] = useState(false);
+  const [refazer, setRefazer] = useState(false);
   const [erroRetro, setErroRetro] = useState<string | null>(null);
   const [atualizando, setAtualizando] = useState(false);
   const [campanhasOk, setCampanhasOk] = useState(false);
@@ -278,6 +279,7 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
 
   // A atualização do passado roda sozinha no servidor (em segundo plano). Aqui só se acompanha o andamento.
   const rodando = job?.status === "rodando";
+  const concluido = job?.status === "concluido";
   useEffect(() => {
     if (!idAtual || !rodando) return;
     let vivo = true;
@@ -413,6 +415,7 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
     if (!idAtual) return;
     setErroRetro(null);
     setCampanhasOk(false);
+    setRefazer(false);
     setIniciando(true);
     try {
       const r = await iniciarRetroativo({ tipo, templateId: idAtual, desde: desdeDo(periodo) });
@@ -923,6 +926,26 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                   contato pelo imóvel. Para valer também para as conversas <strong>antigas</strong>, escolha até quando
                   voltar no tempo: o sistema busca no RealMate e registra os interesses.
                 </p>
+                {concluido && !refazer && !rodando && !iniciando ? (
+                  <div className="border border-forest-900 bg-green-soft px-4 py-4 text-sm text-forest-800">
+                    <div className="flex items-center gap-2 font-semibold">
+                      <Check size={16} /> Template ligado e passado atualizado
+                    </div>
+                    <p className="mt-1 text-forest-800/80">
+                      As conversas desde {job!.desde.slice(0, 10).split("-").reverse().join("/")} já foram lidas e as novas mensagens
+                      deste tipo passam a ser registradas automaticamente. Siga para o último passo.
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-4">
+                      <button type="button" disabled className={btnPrimario}>
+                        <History size={15} /> Passado já atualizado
+                      </button>
+                      <button type="button" onClick={() => setRefazer(true)} className="text-xs text-neutral-500 underline hover:text-neutral-700">
+                        Refazer a atualização
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                <>
                 <div className="mb-4 flex flex-wrap gap-2">
                   {PERIODOS_PASSADO.map((p) => (
                     <button
@@ -970,6 +993,9 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                   )}
                 </div>
 
+                </>
+                )}
+
                 {erroRetro && (
                   <div className="mt-4 flex items-start gap-2 border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
                     <AlertTriangle size={16} className="mt-0.5 shrink-0" /> {erroRetro}
@@ -1014,9 +1040,12 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                 bloqueio={bloqueio5}
                 onToggle={() => setAberta(aberta === 5 ? 0 : 5)}
               >
-                {job?.status === "concluido" && job.resumo ? (
+                {concluido && job?.resumo ? (
                   <>
-                    <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <p className="mb-3 text-sm text-neutral-600">
+                      O sistema leu as conversas e registrou o interesse dos contatos pelos imóveis:
+                    </p>
+                    <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
                       {[
                         ["Mensagens deste template", job.resumo.mensagens],
                         ["Com código do imóvel", job.resumo.com_codigo],
@@ -1029,14 +1058,30 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                         </div>
                       ))}
                     </div>
-                    <p className="mb-3 text-sm text-neutral-600">
-                      Os interesses já estão registrados. Em Campanhas eles aparecem na próxima atualização automática
-                      (06h, 12h e 18h) ou agora, pelo botão abaixo.
-                    </p>
-                    <button onClick={atualizarAgora} disabled={atualizando || campanhasOk} className={btnSecundario}>
-                      {atualizando ? <Loader2 size={14} className="animate-spin" /> : campanhasOk ? <Check size={14} /> : <RefreshCw size={14} />}
-                      {campanhasOk ? "Campanhas atualizadas" : atualizando ? "Atualizando… (até 1 min)" : "Atualizar Campanhas agora"}
-                    </button>
+
+                    <div className="border-t border-line pt-5">
+                      <p className="mb-1 text-sm font-semibold text-forest-900">Mostrar esses interesses na tela de Campanhas</p>
+                      <p className="mb-3 text-xs text-neutral-500">
+                        A tela de Campanhas usa uma cópia dos dados, que se atualiza sozinha às 06h, 12h e 18h. Se quiser ver
+                        agora, clique abaixo (leva até 1 minuto). Se não clicar, tudo bem: aparece na próxima atualização.
+                      </p>
+                      <button onClick={atualizarAgora} disabled={atualizando || campanhasOk} className={btnSecundario}>
+                        {atualizando ? <Loader2 size={14} className="animate-spin" /> : campanhasOk ? <Check size={14} /> : <RefreshCw size={14} />}
+                        {campanhasOk ? "Campanhas atualizadas" : atualizando ? "Atualizando… (até 1 min)" : "Atualizar Campanhas agora"}
+                      </button>
+                    </div>
+
+                    <div className="mt-6 border border-forest-900 bg-green-soft px-4 py-4">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-forest-800">
+                        <Check size={16} /> Cadastro concluído
+                      </div>
+                      <p className="mt-1 text-sm text-forest-800/80">
+                        O template “{titulo}” está em uso. Não falta mais nada: você já pode voltar para a página inicial.
+                      </p>
+                      <button onClick={onFechar} className={`${btnPrimario} mt-3`}>
+                        Concluir e voltar
+                      </button>
+                    </div>
                   </>
                 ) : (
                   <p className="text-sm text-neutral-500">O resultado aparece quando a atualização do passado terminar.</p>
