@@ -22,6 +22,7 @@ import { PALAVRAS_SUGERIDAS, acharCodigoNoTexto } from "../lib/codigoRegras";
 import {
   aprovarTemplate,
   atualizarCampanhas,
+  atualizarConversas,
   cancelarRetroativo,
   estimarRetroativo,
   iniciarRetroativo,
@@ -177,7 +178,9 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
   const [teste, setTeste] = useState<TesteSalvo | null>(null);
   const [soProblemas, setSoProblemas] = useState(false);
   const [aprovando, setAprovando] = useState(false);
-  const [prog, setProg] = useState<{ lidas: number; total: number; msgs: number } | null>(null);
+  const [prog, setProg] = useState<{ fase: "atualizar" | "ler"; lidas: number; total: number; msgs: number; ate?: string | null } | null>(null);
+  const [parando, setParando] = useState(false);
+  const [faseInicio, setFaseInicio] = useState<string | null>(null);
   const [pagina, setPagina] = useState(1);
   const pararTeste = useRef(false);
 
@@ -356,24 +359,44 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
     }
   };
 
-  // Lê as conversas em rodadas curtas, mostrando o andamento, até acabar (ou o usuário parar).
+  // Traz as conversas mais recentes do RealMate antes de testar ou atualizar o passado.
+  const atualizarConversasRecentes = async (): Promise<string | null> => {
+    let iniciar = true;
+    for (let i = 0; i < 30 && !pararTeste.current; i++) {
+      const r = await atualizarConversas(iniciar);
+      iniciar = false;
+      if (r.pronto) return r.atualizadoAte ?? null;
+      await new Promise((res) => setTimeout(res, 3000));
+    }
+    return null;
+  };
+
+  // Atualiza as conversas recentes e lê as do período em rodadas curtas, mostrando o andamento, até acabar (ou parar).
   const rodarTeste = async (continuar: boolean) => {
     if (!idAtual) return;
     setTestando(true);
+    setParando(false);
     setErroTeste(null);
     pararTeste.current = false;
     let offset = continuar ? teste?.resumo?.sessoes_lidas ?? 0 : 0;
-    setProg({ lidas: offset, total: continuar ? teste?.resumo?.total_sessoes ?? 0 : 0, msgs: continuar ? teste?.resumo?.casaram ?? 0 : 0 });
+    let ate: string | null = null;
     let leu = continuar;
     try {
-      for (;;) {
-        const rd = await testarTemplate({ tipo, templateId: idAtual, dias, offset });
-        leu = true;
-        offset = rd.proximoOffset;
-        const t = await obterTeste(tipo, idAtual);
-        setTeste(t);
-        setProg({ lidas: offset, total: rd.totalSessoes, msgs: t.resumo?.casaram ?? 0 });
-        if (rd.sessoesLidas === 0 || offset >= rd.totalSessoes || pararTeste.current) break;
+      if (!continuar) {
+        setProg({ fase: "atualizar", lidas: 0, total: 0, msgs: 0 });
+        ate = await atualizarConversasRecentes();
+      }
+      if (!pararTeste.current) {
+        setProg({ fase: "ler", lidas: offset, total: continuar ? teste?.resumo?.total_sessoes ?? 0 : 0, msgs: continuar ? teste?.resumo?.casaram ?? 0 : 0, ate });
+        for (;;) {
+          const rd = await testarTemplate({ tipo, templateId: idAtual, dias, offset });
+          leu = true;
+          offset = rd.proximoOffset;
+          const t = await obterTeste(tipo, idAtual);
+          setTeste(t);
+          setProg({ fase: "ler", lidas: offset, total: rd.totalSessoes, msgs: t.resumo?.casaram ?? 0, ate });
+          if (rd.sessoesLidas === 0 || offset >= rd.totalSessoes || pararTeste.current) break;
+        }
       }
     } catch (e) {
       setErroTeste((e as Error).message);
@@ -390,6 +413,7 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
         }
       }
       setTestando(false);
+      setParando(false);
       setProg(null);
     }
   };
@@ -417,7 +441,11 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
     setCampanhasOk(false);
     setRefazer(false);
     setIniciando(true);
+    pararTeste.current = false;
     try {
+      setFaseInicio("Atualizando as conversas mais recentes…");
+      await atualizarConversasRecentes();
+      setFaseInicio("Iniciando…");
       const r = await iniciarRetroativo({ tipo, templateId: idAtual, desde: desdeDo(periodo) });
       setJob(r.job);
       setItem(await carregarItem(idAtual));
@@ -426,6 +454,7 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
       setErroRetro((e as Error).message);
     } finally {
       setIniciando(false);
+      setFaseInicio(null);
     }
   };
 
@@ -765,20 +794,41 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                     {testando ? "Lendo o RealMate…" : testeOk ? "Testar de novo" : "Rodar teste"}
                   </button>
                   {testando && (
-                    <button onClick={() => { pararTeste.current = true; }} className="inline-flex items-center gap-2 border border-red-400 px-5 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50">
-                      <X size={15} /> Parar e ver o que achou
+                    <button
+                      onClick={() => { pararTeste.current = true; setParando(true); }}
+                      disabled={parando}
+                      className="inline-flex items-center gap-2 border border-red-400 px-5 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {parando ? <Loader2 size={15} className="animate-spin" /> : <X size={15} />}
+                      {parando ? "Parando…" : prog?.fase === "atualizar" ? "Cancelar" : "Parar e ver o que achou"}
                     </button>
                   )}
                 </div>
                 {testando && prog && (
                   <div className="mb-4 border border-line bg-white p-4">
-                    <div className="h-2 w-full bg-neutral-100">
-                      <div className="h-2 bg-green-accent transition-all" style={{ width: `${prog.total > 0 ? Math.min(100, Math.round((prog.lidas / prog.total) * 100)) : 0}%` }} />
-                    </div>
-                    <div className="mt-2 text-xs text-neutral-600">
-                      {prog.total > 0 ? `${num(prog.lidas)} de ${num(prog.total)} conversas lidas` : "Começando a leitura…"} · {num(prog.msgs)} mensagem(ns) encontrada(s) até agora
-                    </div>
-                    <p className="mt-1 text-xs text-neutral-500">Fique nesta tela até terminar. Se preferir, clique em “Parar e ver o que achou” a qualquer momento.</p>
+                    {prog.fase === "atualizar" ? (
+                      <>
+                        <div className="flex items-center gap-2 text-sm font-medium text-forest-900">
+                          <Loader2 size={15} className="animate-spin" /> Atualizando as conversas mais recentes do RealMate…
+                        </div>
+                        <p className="mt-1 text-xs text-neutral-500">Isso garante que conversas novas também entrem no teste. Leva cerca de 1 a 2 minutos.</p>
+                      </>
+                    ) : (
+                      <>
+                        <div className="h-2 w-full bg-neutral-100">
+                          <div className="h-2 bg-green-accent transition-all" style={{ width: `${prog.total > 0 ? Math.min(100, Math.round((prog.lidas / prog.total) * 100)) : 0}%` }} />
+                        </div>
+                        <div className="mt-2 text-xs text-neutral-600">
+                          {prog.total > 0 ? `${num(prog.lidas)} de ${num(prog.total)} conversas lidas` : "Começando a leitura…"} · {num(prog.msgs)} mensagem(ns) encontrada(s) até agora
+                        </div>
+                        <p className="mt-1 text-xs text-neutral-500">
+                          {parando
+                            ? "Terminando a leitura em andamento (alguns segundos)…"
+                            : "Fique nesta tela até terminar, ou clique em “Parar e ver o que achou” a qualquer momento."}
+                          {prog.ate && !parando ? ` Conversas atualizadas até ${dataHora(prog.ate)}.` : ""}
+                        </p>
+                      </>
+                    )}
                   </div>
                 )}
                 {erroTeste && (
@@ -979,7 +1029,7 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                 <div className="flex flex-wrap items-center gap-3">
                   {!rodando ? (
                     <button onClick={iniciarPassado} disabled={iniciando} className={btnPrimario}>
-                      {iniciando ? <Loader2 size={15} className="animate-spin" /> : <History size={15} />} Ligar e atualizar o passado
+                      {iniciando ? <Loader2 size={15} className="animate-spin" /> : <History size={15} />} {iniciando ? faseInicio ?? "Iniciando…" : "Ligar e atualizar o passado"}
                     </button>
                   ) : (
                     <button onClick={pararPassado} className="inline-flex items-center gap-2 border border-red-400 px-5 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50">

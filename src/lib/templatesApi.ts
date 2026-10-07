@@ -177,6 +177,11 @@ export const testarTemplate = (p: { tipo: TipoTemplate; templateId: string; dias
     offset: p.offset,
   });
 
+// Traz do RealMate as conversas e contatos mais recentes (o banco só sabe até a última sincronização).
+// Cada chamada avança um pedaço; a tela repete até `pronto`.
+export const atualizarConversas = (iniciar: boolean) =>
+  chamarFuncao<{ pronto: boolean; atualizadoAte?: string | null }>({ action: "atualizar_conversas", iniciar });
+
 export const ligarTemplate = (tipo: TipoTemplate, id: string, ligar: boolean) =>
   chamarFuncao<{ ok: boolean }>({ action: "ligar", tipo, template_id: id, ligar });
 
