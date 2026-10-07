@@ -28,6 +28,12 @@ export type ContatoBusca = {
   ja_ignorado: boolean;
 };
 
+export type ContatoResolvido = ContatoBusca & { encontrado: boolean };
+
+// Reconhece uma lista de telefones (colada) contra os contatos do RealMate/Vista.
+export const resolverTelefones = (telefones: string[]) =>
+  rpc<ContatoResolvido[]>("ignorados_resolver", { p_telefones: telefones });
+
 // Busca contatos do RealMate/Vista por telefone (inteiro ou parte) ou por nome.
 export const buscarContatos = (q: string) => rpc<ContatoBusca[]>("ignorados_buscar_contatos", { p_q: q });
 
