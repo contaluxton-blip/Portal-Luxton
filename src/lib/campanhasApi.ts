@@ -1,4 +1,7 @@
 import { supabase } from "./supabase";
+import { condicoesParaRpc, type CaixaCond } from "./condicoes";
+
+export type Ordem = "lead_asc" | "lead_desc" | "entrada_asc" | "entrada_desc";
 
 export type Finalidade = "venda" | "locacao" | "ambos";
 
@@ -6,7 +9,6 @@ export type Finalidade = "venda" | "locacao" | "ambos";
 // exatos de uma função de agregação no banco, independente deste teto. A lista
 // completa (para copiar/exportar) é puxada sob demanda por fetchTodosLeads.
 const LINHAS_EXIBICAO = 1000;
-const TAMANHO_PAGINA = 1000; // teto de linhas por requisição do PostgREST (max-rows).
 
 // Valor sentinela para o "sem canal definido" do filtro de canal. Usamos o
 // próprio rótulo legível como valor porque ele nunca colide com um valor real.
@@ -40,6 +42,7 @@ export type FiltrosInput = {
   precoMax: string;
   tipos: string[]; // categorias
   quartosMin: string;
+  quartosMax: string;
   vagasMin: string;
   metragemMin: string;
   metragemMax: string;
@@ -50,10 +53,9 @@ export type FiltrosInput = {
   canais: string[];
   sistemas: string[]; // fonte do contato: [] = todas, ['realmente'], ['vista']
   exigirImovel: boolean; // false = traz todos os contatos, com ou sem imóvel
-  statusNegocio: string[]; // status do negócio (Vista): Em aberto/Ganho/Perdido
-  fases: string[]; // fase do negócio (etapa), por pipeline da finalidade
-  diasSemAtividade: string; // negócio sem atualização há mais de N dias (Vista)
-  corretores: string[]; // corretor do negócio (Vista); liga o "modo por negócio"
+  condicoes: CaixaCond[]; // construtor de condições de negócio (caixas E/OU)
+  ordem?: Ordem | null; // ordenação da lista (feita no banco, antes do corte de 1.000 linhas)
+  busca?: string; // busca por nome/telefone: só filtra a lista EXIBIDA (não muda totais, cópia nem planilha)
 };
 
 // Linha achatada devolvida pela função campanhas_rows (já com o valor e os
@@ -76,6 +78,7 @@ type RpcRow = {
   corretor_nome: string | null;
   entrada: string | null;
   canais: string[] | null;
+  status_negocio: string | null; // Ganho / Em aberto / Perdido / Sem negócio
 };
 
 type Kpi = {
@@ -106,6 +109,7 @@ export type LeadGrupo = {
   entrada: string | null;
   canais: string[];
   sistemas: string[]; // fontes que confirmam esse lead (RealMate/Vista)
+  statusNegocio: string; // Ganho > Em aberto > Perdido > Sem negócio (do lead todo)
   imoveis: ImovelInteresse[];
 };
 
@@ -113,6 +117,7 @@ export type ResultadoCampanha = {
   grupos: LeadGrupo[]; // apenas os leads EXIBIDOS na tabela (primeira página)
   totalLinhas: number; // exato (linhas contato x imovel que casaram)
   truncado: boolean; // true se a tabela mostra só parte dos leads
+  buscaAtiva: boolean; // a tabela está filtrada por uma busca
   totalLeads: number; // exato (contatos distintos que casaram)
   vgvTotal: number; // exato
   vgvMedio: number; // exato
@@ -135,15 +140,14 @@ function toParams(f: FiltrosInput) {
     p_metragem_min: f.metragemMin ? Number(f.metragemMin) : null,
     p_metragem_max: f.metragemMax ? Number(f.metragemMax) : null,
     p_quartos_min: f.quartosMin ? Number(f.quartosMin) : null,
+    p_quartos_max: f.quartosMax ? Number(f.quartosMax) : null,
     p_vagas_min: f.vagasMin ? Number(f.vagasMin) : null,
     p_codigo_imovel: f.codigoImovel.trim() || null,
     p_data_inicial: f.dataInicial || null,
     p_data_final: f.dataFinal || null,
     p_exigir_imovel: f.exigirImovel,
-    p_status_negocio: f.statusNegocio,
-    p_fases: f.fases,
-    p_dias_sem_atividade: f.diasSemAtividade ? Number(f.diasSemAtividade) : null,
-    p_corretores: f.corretores,
+    p_condicoes: condicoesParaRpc(f.condicoes),
+    p_ordem: f.ordem ?? null,
   };
 }
 
@@ -174,6 +178,7 @@ function agrupar(linhas: RpcRow[]): LeadGrupo[] {
       if (imovel) existente.imoveis.push(imovel);
       for (const c of r.canais ?? []) if (!existente.canais.includes(c)) existente.canais.push(c);
       for (const s of fontes) if (!existente.sistemas.includes(s)) existente.sistemas.push(s);
+      if (r.entrada && (!existente.entrada || r.entrada < existente.entrada)) existente.entrada = r.entrada;
     } else {
       porContato.set(r.contact_id, {
         id: r.contact_id,
@@ -183,6 +188,7 @@ function agrupar(linhas: RpcRow[]): LeadGrupo[] {
         entrada: r.entrada,
         canais: [...(r.canais ?? [])],
         sistemas: [...fontes],
+        statusNegocio: r.status_negocio ?? "Sem negócio",
         imoveis: imovel ? [imovel] : [],
       });
     }
@@ -205,53 +211,44 @@ export async function fetchCampanha(f: FiltrosInput): Promise<ResultadoCampanha>
   const params = toParams(f);
 
   // KPIs exatos (agregados no banco) + primeira página de linhas para exibição.
+  // A ordenação só vale para a lista; os totais (kpis) não recebem esse parâmetro.
+  const { p_ordem: _ordem, ...paramsKpis } = params;
+  void _ordem;
   const [kpiRes, linhasRes] = await Promise.all([
-    supabase.rpc("campanhas_kpis", params),
-    supabase.rpc("campanhas_rows", params).range(0, LINHAS_EXIBICAO - 1),
+    supabase.rpc("campanhas_kpis", paramsKpis),
+    supabase.rpc("campanhas_rows", { ...params, p_busca: f.busca?.trim() || null }).range(0, LINHAS_EXIBICAO - 1),
   ]);
   if (kpiRes.error) throw kpiRes.error;
   if (linhasRes.error) throw linhasRes.error;
 
   const k = kpiRes.data as Kpi;
   const grupos = agrupar((linhasRes.data ?? []) as RpcRow[]);
+  const buscaAtiva = !!f.busca?.trim();
 
   return {
     grupos,
     totalLinhas: k.total_linhas,
     totalLeads: k.total_leads,
-    truncado: k.total_leads > grupos.length,
+    truncado: buscaAtiva ? (linhasRes.data?.length ?? 0) >= LINHAS_EXIBICAO : k.total_leads > grupos.length,
+    buscaAtiva,
     vgvTotal: k.vgv_total,
     vgvMedio: k.vgv_medio,
     tempoMedioDias: k.tempo_medio_dias,
   };
 }
 
-// Puxa TODOS os leads do filtro (todas as páginas, em paralelo) para copiar
-// números / exportar planilha.
+// Puxa TODOS os leads do filtro, numa única chamada, para exportar a planilha.
 export async function fetchTodosLeads(f: FiltrosInput): Promise<LeadGrupo[]> {
-  const params = toParams(f);
+  const { data, error } = await supabase.rpc("campanhas_lista_json", { ...toParams(f), p_modo: "completo" });
+  if (error) throw error;
+  return agrupar((data ?? []) as RpcRow[]);
+}
 
-  const primeira = await supabase
-    .rpc("campanhas_rows", params, { count: "exact" })
-    .range(0, TAMANHO_PAGINA - 1);
-  if (primeira.error) throw primeira.error;
-
-  let linhas = (primeira.data ?? []) as RpcRow[];
-  const total = primeira.count ?? linhas.length;
-
-  const pendentes = [];
-  for (let inicio = TAMANHO_PAGINA; inicio < total; inicio += TAMANHO_PAGINA) {
-    pendentes.push(
-      supabase.rpc("campanhas_rows", params).range(inicio, inicio + TAMANHO_PAGINA - 1)
-    );
-  }
-  const paginas = await Promise.all(pendentes);
-  for (const p of paginas) {
-    if (p.error) throw p.error;
-    linhas = linhas.concat((p.data ?? []) as RpcRow[]);
-  }
-
-  return agrupar(linhas);
+// Pares [id do lead, telefone] (distintos, na ordem da lista), numa chamada leve, para "Copiar números".
+export async function fetchTelefones(f: FiltrosInput): Promise<[string, string][]> {
+  const { data, error } = await supabase.rpc("campanhas_lista_json", { ...toParams(f), p_modo: "telefones" });
+  if (error) throw error;
+  return (data ?? []) as [string, string][];
 }
 
 // ---- Gráficos do topo (imóveis/bairros com mais leads, por finalidade) ----

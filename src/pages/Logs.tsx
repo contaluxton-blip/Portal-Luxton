@@ -48,6 +48,18 @@ function descrever(l: LogRow): { principal: string; apoio?: string } {
       return { principal: txt(d.perfil) };
     case "buscou_usuario":
       return { principal: `“${txt(d.termo)}”` };
+    case "template_salvo":
+    case "template_excluido":
+      return { principal: txt(d.template), apoio: txt(d.tipo) === "padrao" ? "Template padrão" : "Template não padrão" };
+    case "template_testado":
+      return {
+        principal: `${num(Number(d.casaram ?? 0))} mensagem(ns) casaram · ${num(Number(d.com_codigo ?? 0))} com código`,
+        apoio: `${num(Number(d.sessoes_lidas ?? 0))} sessões lidas · últimos ${num(Number(d.dias ?? 0))} dias`,
+      };
+    case "template_retroativo":
+      return { principal: txt(d.template), apoio: `${num(Number(d.sessoes ?? 0))} sessões desde ${txt(d.desde)}` };
+    case "template_retroativo_concluido":
+      return { principal: txt(d.template), apoio: `${num(Number(d.mensagens ?? 0))} mensagem(ns) gravadas` };
     case "usuario_criado":
       return { principal: alvo, apoio: txt(d.papel) ? `Perfil: ${txt(d.papel)}` : undefined };
     case "usuario_reativado":

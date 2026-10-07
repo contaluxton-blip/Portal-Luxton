@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Search, X } from "lucide-react";
 
 type Props = {
-  label: string;
+  label?: string; // sem rótulo = uso compacto dentro de uma linha
   options: string[];
   selected: string[];
   onChange: (v: string[]) => void;
   placeholder?: string;
+  single?: boolean; // escolhe um único valor: clicar troca a escolha e fecha a lista
   flags?: string[]; // fontes que este filtro está aplicando: 'realmente' | 'vista'
 };
 
@@ -39,6 +40,7 @@ export function MultiSelect({
   selected,
   onChange,
   placeholder = "Todos",
+  single = false,
   flags,
 }: Props) {
   const [open, setOpen] = useState(false);
@@ -63,22 +65,30 @@ export function MultiSelect({
     return q ? options.filter((o) => normalizar(o).includes(q)) : options;
   }, [options, busca]);
 
-  const toggle = (opt: string) =>
+  const toggle = (opt: string) => {
+    if (single) {
+      onChange(selected.includes(opt) ? [] : [opt]);
+      setOpen(false);
+      return;
+    }
     onChange(
       selected.includes(opt)
         ? selected.filter((s) => s !== opt)
         : [...selected, opt]
     );
+  };
 
   // Preenchido = borda/fundo mais fortes (verde); vazio = clarinho.
   const preenchido = selected.length > 0;
 
   return (
     <div ref={ref} className="relative">
-      <label className="mb-1.5 block text-xs font-medium text-neutral-600">
-        {label}
-        <FonteFlags flags={flags} />
-      </label>
+      {label && (
+        <label className="mb-1.5 block text-xs font-medium text-neutral-600">
+          {label}
+          <FonteFlags flags={flags} />
+        </label>
+      )}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

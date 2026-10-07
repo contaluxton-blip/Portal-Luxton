@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ArrowLeft,
@@ -21,21 +21,31 @@ import {
   AlertTriangle,
   Building2,
   MapPin,
+  Settings,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+  Search,
 } from "lucide-react";
 import { LuxtonMark } from "../components/Logo";
 import { MultiSelect, Chips, FonteFlags } from "../components/MultiSelect";
+import { ConstrutorNegocio } from "../components/ConstrutorNegocio";
+import { SEM_NEGOCIO, descreverCondicoes, migrarLegado, semFase, type CaixaCond } from "../lib/condicoes";
 import { brl, num, dataBR } from "../lib/format";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
 import { registrarLog } from "../lib/logs";
+import { formatarTelefone, telefoneParaCopia } from "../lib/telefone";
 import {
   fetchCampanha,
   fetchFacets,
   fetchTodosLeads,
+  fetchTelefones,
   fetchDashboards,
   SEM_CANAL,
   SISTEMA_LABEL,
   type Finalidade,
+  type Ordem,
   type FacetsCampanha,
   type LeadGrupo,
   type ResultadoCampanha,
@@ -49,6 +59,7 @@ type Filtros = {
   precoMax: string;
   tipos: string[];
   quartosMin: string;
+  quartosMax: string;
   vagasMin: string;
   metragemMin: string;
   metragemMax: string;
@@ -59,10 +70,15 @@ type Filtros = {
   canais: string[];
   sistemas: string[];
   exigirImovel: boolean;
-  statusNegocio: string[]; // status do negócio (Vista) — filtra de verdade
-  fases: string[]; // fase do negócio (etapa, por pipeline) — filtra de verdade
-  corretores: string[]; // corretor do negócio (Vista) — filtra de verdade
-  diasSemAtividade: string;
+  condicoes: CaixaCond[]; // construtor de condições de negócio (caixas E/OU)
+};
+
+// Perfis salvos antes do construtor guardam os filtros de negócio soltos.
+type FiltrosSalvos = Partial<Filtros> & {
+  statusNegocio?: string[];
+  fases?: string[];
+  corretores?: string[];
+  diasSemAtividade?: string;
 };
 
 const VAZIO: Filtros = {
@@ -72,6 +88,7 @@ const VAZIO: Filtros = {
   precoMax: "",
   tipos: [],
   quartosMin: "",
+  quartosMax: "",
   vagasMin: "",
   metragemMin: "",
   metragemMax: "",
@@ -82,10 +99,7 @@ const VAZIO: Filtros = {
   canais: [],
   sistemas: [],
   exigirImovel: true,
-  statusNegocio: [],
-  fases: [],
-  corretores: [],
-  diasSemAtividade: "",
+  condicoes: [],
 };
 
 // Perfis de filtro salvos (segmentos reutilizáveis).
@@ -99,18 +113,36 @@ type PerfilFiltro = {
   criadoEm?: string;
 };
 
-const comFiltros = (parcial: Partial<Filtros>): Filtros => ({ ...VAZIO, ...parcial });
+// Seleção de leads para copiar/exportar: começa com TODOS marcados; as exceções guardam só o que o usuário mudou.
+type Selecao = { modo: "todos" | "nenhum"; excecoes: Set<string> };
+const todosMarcados = (): Selecao => ({ modo: "todos", excecoes: new Set() });
+
+const comFiltros = (salvos: FiltrosSalvos): Filtros => {
+  const { statusNegocio, fases, corretores, diasSemAtividade, ...resto } = salvos;
+  return {
+    ...VAZIO,
+    ...resto,
+    condicoes: migrarLegado({ condicoes: salvos.condicoes, statusNegocio, fases, corretores, diasSemAtividade }),
+  };
+};
 
 // Estilo dos campos de filtro. Preenchido = borda/fundo mais fortes (verde) para
 // destacar o que já foi escolhido; vazio = clarinho, para não confundir.
 const inputBase =
   "w-full border px-3 py-2 text-sm transition placeholder:text-neutral-400 focus:border-green-accent focus:outline-none";
-const inputEmptyCls = "border-line bg-white text-neutral-700 hover:border-forest-900";
+const inputEmptyCls = "border-line bg-white text-neutral-400 hover:border-forest-900 [&_option]:text-neutral-800";
 const inputFilledCls = "border-forest-900 bg-green-soft text-neutral-900 font-medium";
 const campoCls = (filled: boolean) => `${inputBase} ${filled ? inputFilledCls : inputEmptyCls}`;
-const inputCls = campoCls(false);
+const inputCls = `${inputBase} border-line bg-white text-neutral-800 hover:border-forest-900`;
 
 const dataEntradaBR = (iso: string | null) => (iso ? dataBR(iso.slice(0, 10)) : "");
+
+const STATUS_NEGOCIO_COR: Record<string, string> = {
+  Ganho: "bg-green-soft text-forest-800 ring-green-600/30",
+  "Em aberto": "bg-blue-50 text-blue-700 ring-blue-600/20",
+  Perdido: "bg-red-50 text-red-700 ring-red-600/20",
+  "Sem negócio": "bg-neutral-100 text-neutral-600 ring-neutral-500/20",
+};
 
 const FINALIDADE_LABEL: Record<Finalidade, string> = {
   venda: "Venda",
@@ -133,17 +165,16 @@ function descreverFiltros(f: Filtros): string[] {
   if (f.precoMax) l.push(`Preço máx: ${brl(Number(f.precoMax))}`);
   if (f.metragemMin) l.push(`Metragem mín: ${f.metragemMin} m²`);
   if (f.metragemMax) l.push(`Metragem máx: ${f.metragemMax} m²`);
-  if (f.quartosMin) l.push(`Quartos: ${f.quartosMin}+`);
+  if (f.quartosMin && f.quartosMax) l.push(`Quartos: de ${f.quartosMin} a ${f.quartosMax}`);
+  else if (f.quartosMin) l.push(`Quartos: ${f.quartosMin}+`);
+  else if (f.quartosMax) l.push(`Quartos: até ${f.quartosMax}`);
   if (f.vagasMin) l.push(`Vagas: ${f.vagasMin}+`);
   if (f.codigoImovel) l.push(`Código do imóvel: ${f.codigoImovel}`);
   if (f.statusImovel.length) l.push(`Status do imóvel: ${f.statusImovel.join(", ")}`);
   if (f.dataInicial) l.push(`Entrada de: ${f.dataInicial}`);
   if (f.dataFinal) l.push(`Entrada até: ${f.dataFinal}`);
   if (f.canais.length) l.push(`Canal: ${f.canais.join(", ")}`);
-  if (f.statusNegocio.length) l.push(`Status do negócio: ${f.statusNegocio.join(", ")}`);
-  if (f.fases.length) l.push(`Fase: ${f.fases.join(", ")}`);
-  if (f.corretores.length) l.push(`Corretor: ${f.corretores.join(", ")}`);
-  if (f.diasSemAtividade) l.push(`Negócio parado há +${f.diasSemAtividade} dias`);
+  if (f.condicoes.length) l.push(`Negócio: leads em que ${descreverCondicoes(f.condicoes)}`);
   return l;
 }
 
@@ -151,6 +182,12 @@ export default function Campanhas() {
   const [rascunho, setRascunho] = useState<Filtros>(VAZIO);
   const [aplicado, setAplicado] = useState<Filtros | null>(null);
   const jaAplicou = aplicado !== null;
+  // Ordenação clicando no cabeçalho (Lead A-Z / Entrada). Vale para a tela, para copiar números e para a planilha.
+  const [ordem, setOrdem] = useState<Ordem | null>(null);
+  const ultimoLog = useRef<Filtros | null>(null);
+  const [selecao, setSelecao] = useState<Selecao>(todosMarcados);
+  const [busca, setBusca] = useState("");
+  const [buscaAplicada, setBuscaAplicada] = useState("");
 
   // Dados vindos do Supabase ao vivo.
   const [facets, setFacets] = useState<FacetsCampanha | null>(null);
@@ -160,7 +197,7 @@ export default function Campanhas() {
   const [erro, setErro] = useState<string | null>(null);
 
   // Usuário logado (para atribuir e autorizar edição/exclusão de perfis salvos).
-  const { perfil: usuarioLogado, ehAdminGeral } = useAuth();
+  const { perfil: usuarioLogado, ehAdminGeral, ehAdmin } = useAuth();
 
   // Perfis salvos (agora no banco, compartilhados pela equipe).
   const [perfisUsuario, setPerfisUsuario] = useState<PerfilFiltro[]>([]);
@@ -172,6 +209,7 @@ export default function Campanhas() {
   const [confirmarPerfil, setConfirmarPerfil] = useState<PerfilFiltro | null>(null);
   const [perfilAtivo, setPerfilAtivo] = useState<string | null>(null);
   const [copiado, setCopiado] = useState(false);
+  const [numerosModal, setNumerosModal] = useState<string | null>(null);
   const [baixando, setBaixando] = useState<null | "csv" | "copia">(null);
   const perfis = perfisUsuario;
 
@@ -202,14 +240,18 @@ export default function Campanhas() {
     let ativo = true;
     setCarregando(true);
     setErro(null);
-    fetchCampanha(aplicado)
+    fetchCampanha({ ...aplicado, ordem, busca: buscaAplicada })
       .then((r) => {
         if (!ativo) return;
         setResultado(r);
-        registrarLog("aplicou_filtros", {
-          filtros: descreverFiltros(aplicado),
-          total_leads: r.totalLeads,
-        });
+        // Reordenar a lista não conta como "aplicou filtros": só registra quando os filtros mudaram.
+        if (ultimoLog.current !== aplicado) {
+          ultimoLog.current = aplicado;
+          registrarLog("aplicou_filtros", {
+            filtros: descreverFiltros(aplicado),
+            total_leads: r.totalLeads,
+          });
+        }
       })
       .catch((e) => {
         if (!ativo) return;
@@ -220,7 +262,13 @@ export default function Campanhas() {
     return () => {
       ativo = false;
     };
-  }, [aplicado]);
+  }, [aplicado, ordem, buscaAplicada]);
+
+  // A busca espera o usuário parar de digitar.
+  useEffect(() => {
+    const t = setTimeout(() => setBuscaAplicada(busca.trim()), 400);
+    return () => clearTimeout(t);
+  }, [busca]);
 
   // Carrega os perfis salvos do banco.
   useEffect(() => {
@@ -236,7 +284,7 @@ export default function Campanhas() {
             id: d.id as string,
             nome: d.nome as string,
             descricao: (d.descricao as string) || "",
-            filtros: comFiltros(d.filtros as Partial<Filtros>),
+            filtros: comFiltros(d.filtros as FiltrosSalvos),
             criadoPorId: d.criado_por as string | null,
             criadoPorNome: (d.criado_por_nome as string) || "",
             criadoEm: d.criado_em as string,
@@ -250,7 +298,12 @@ export default function Campanhas() {
 
   const set = <K extends keyof Filtros>(k: K, v: Filtros[K]) => {
     setPerfilAtivo(null);
-    setRascunho((r) => ({ ...r, [k]: v }));
+    setRascunho((r) => ({
+      ...r,
+      [k]: v,
+      // Fase só existe com venda OU locação e imóvel exigido.
+      ...(k === "exigirImovel" ? { condicoes: semFase(r.condicoes) } : {}),
+    }));
     // Mudou um filtro: esconde a lista até reaplicar, para nunca copiar/exportar
     // números de um filtro que ainda não foi aplicado.
     setAplicado(null);
@@ -315,7 +368,7 @@ export default function Campanhas() {
           id: data.id,
           nome: data.nome,
           descricao: data.descricao || "",
-          filtros: comFiltros(data.filtros as Partial<Filtros>),
+          filtros: comFiltros(data.filtros as FiltrosSalvos),
           criadoPorId: data.criado_por,
           criadoPorNome: data.criado_por_nome || "",
           criadoEm: data.criado_em,
@@ -354,7 +407,12 @@ export default function Campanhas() {
     }
   };
 
-  const aplicar = () => setAplicado(rascunho);
+  const aplicar = () => {
+    setBusca("");
+    setBuscaAplicada("");
+    setSelecao(todosMarcados());
+    setAplicado(rascunho);
+  };
   const limpar = () => {
     setRascunho(VAZIO);
     setAplicado(null);
@@ -379,7 +437,31 @@ export default function Campanhas() {
   }, [resultado, facets, semImovel]);
 
   const grupos = resultado?.grupos ?? [];
-  const temResultado = grupos.length > 0;
+
+  // ---- seleção de leads (vale para copiar números e exportar planilha) ----
+  const estaMarcado = (id: string) => (selecao.modo === "todos" ? !selecao.excecoes.has(id) : selecao.excecoes.has(id));
+  const alternarLead = (id: string) =>
+    setSelecao((s) => {
+      const n = new Set(s.excecoes);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return { ...s, excecoes: n };
+    });
+  // Marca/desmarca os leads que estão na tela (inclusive os achados pela busca).
+  const marcarVisiveis = (marcar: boolean) =>
+    setSelecao((s) => {
+      const n = new Set(s.excecoes);
+      const vaiParaExcecao = s.modo === "todos" ? !marcar : marcar;
+      for (const g of grupos) {
+        if (vaiParaExcecao) n.add(g.id);
+        else n.delete(g.id);
+      }
+      return { ...s, excecoes: n };
+    });
+  const selecionados =
+    selecao.modo === "todos" ? Math.max(0, resumo.totalLeads - selecao.excecoes.size) : selecao.excecoes.size;
+  const visiveisMarcados = grupos.filter((g) => estaMarcado(g.id)).length;
+  const todosVisiveisMarcados = grupos.length > 0 && visiveisMarcados === grupos.length;
 
   // Exportar/copiar puxam a lista COMPLETA do filtro (não só o que está na
   // tela), por isso vão ao banco de novo em vez de usar `grupos`.
@@ -388,9 +470,14 @@ export default function Campanhas() {
     setBaixando("csv");
     setErro(null);
     try {
-      const todos = await fetchTodosLeads(aplicado);
+      const todos = (await fetchTodosLeads({ ...aplicado, ordem })).filter((g) => estaMarcado(g.id));
+      if (todos.length === 0) throw new Error("Nenhum lead selecionado.");
       exportarCSV(todos, aplicado.finalidade);
-      registrarLog("exportou_planilha", { leads: todos.length, filtros: descreverFiltros(aplicado) });
+      registrarLog("exportou_planilha", {
+        leads: todos.length,
+        desmarcados: Math.max(0, resumo.totalLeads - todos.length),
+        filtros: descreverFiltros(aplicado),
+      });
     } catch (e) {
       setErro((e as Error)?.message ?? "Falha ao exportar a lista.");
     } finally {
@@ -398,36 +485,54 @@ export default function Campanhas() {
     }
   };
 
-  const copiarNumeros = async () => {
+  // Copia os números. O navegador só deixa copiar logo após o clique; como buscar a lista leva um tempo,
+  // a cópia é pedida já no clique, com o texto chegando depois (ClipboardItem com promessa). Se o navegador
+  // não aceitar, abre uma janela com os números para copiar com um clique.
+  const copiarNumeros = () => {
     if (!aplicado) return;
     setBaixando("copia");
     setErro(null);
-    try {
-      const todos = await fetchTodosLeads(aplicado);
-      const numeros = todos.map((g) => g.telefone).filter(Boolean).join("\n");
-      try {
-        await navigator.clipboard.writeText(numeros);
-      } catch {
-        const ta = document.createElement("textarea");
-        ta.value = numeros;
-        ta.style.position = "fixed";
-        ta.style.opacity = "0";
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand("copy");
-        document.body.removeChild(ta);
+    let quantidade = 0;
+    const pronto = fetchTelefones({ ...aplicado, ordem }).then((lista) => {
+      const vistos = new Set<string>();
+      const saida: string[] = [];
+      for (const [idLead, t] of lista) {
+        if (!estaMarcado(idLead)) continue;
+        const n = telefoneParaCopia(t);
+        if (n && !vistos.has(n)) {
+          vistos.add(n);
+          saida.push(n);
+        }
       }
+      quantidade = saida.length;
+      return saida.join("\n");
+    });
+    const concluir = () => {
       setCopiado(true);
       setTimeout(() => setCopiado(false), 2000);
       registrarLog("copiou_numeros", {
-        numeros: todos.filter((g) => g.telefone).length,
+        numeros: quantidade,
+        desmarcados: Math.max(0, resumo.totalLeads - selecionados),
         filtros: descreverFiltros(aplicado),
       });
-    } catch (e) {
-      setErro((e as Error)?.message ?? "Falha ao copiar os números.");
-    } finally {
-      setBaixando(null);
-    }
+    };
+    const suportaAsync = typeof ClipboardItem !== "undefined" && !!navigator.clipboard?.write;
+    const tentativa = suportaAsync
+      ? navigator.clipboard.write([
+          new ClipboardItem({ "text/plain": pronto.then((t) => new Blob([t], { type: "text/plain" })) }),
+        ])
+      : Promise.reject(new Error("sem suporte"));
+    tentativa
+      .then(concluir)
+      .catch(async () => {
+        try {
+          setNumerosModal(await pronto);
+          concluir();
+        } catch (e) {
+          setErro((e as Error)?.message ?? "Falha ao copiar os números.");
+        }
+      })
+      .finally(() => setBaixando(null));
   };
 
   const bairrosOpt = facets?.bairros ?? [];
@@ -440,10 +545,9 @@ export default function Campanhas() {
   // quais filtros exclusivos de uma fonte somem.
   const fonteSel = rascunho.sistemas.length ? rascunho.sistemas[0] : "todas";
   const flagsAmbos = fonteSel === "todas" ? ["realmente", "vista"] : [fonteSel];
-  const vistaVisivel = fonteSel !== "realmente"; // filtros só-Vista somem se fonte=RealMate
 
   // Filtros de negócio (Vista). Fase depende do pipeline (finalidade).
-  const statusNegocioOpt = facets?.status_negocio ?? [];
+  const statusNegocioOpt = [...(facets?.status_negocio ?? []), SEM_NEGOCIO];
   const fasesOpt =
     rascunho.finalidade === "venda"
       ? facets?.fases_venda ?? []
@@ -451,15 +555,17 @@ export default function Campanhas() {
       ? facets?.fases_aluguel ?? []
       : [];
   // Fase só faz sentido com um pipeline definido (finalidade venda OU locação,
-  // exigindo imóvel) e com o Vista visível.
-  const faseVisivel = vistaVisivel && rascunho.exigirImovel && rascunho.finalidade !== "ambos";
+  // exigindo imóvel).
+  const faseVisivel = rascunho.exigirImovel && rascunho.finalidade !== "ambos";
 
-  // Trocar a finalidade limpa as fases (as etapas mudam de pipeline).
+  // Trocar a finalidade tira as linhas de fase (as etapas mudam de pipeline).
   const setFinalidade = (fin: Finalidade) => {
     setPerfilAtivo(null);
     setAplicado(null);
-    setRascunho((r) => ({ ...r, finalidade: fin, fases: [] }));
+    setRascunho((r) => ({ ...r, finalidade: fin, condicoes: semFase(r.condicoes) }));
   };
+
+  const setCondicoes = (c: CaixaCond[]) => set("condicoes", c);
 
   return (
     <div className="min-h-full bg-sand">
@@ -477,12 +583,24 @@ export default function Campanhas() {
               </h1>
             </div>
           </Link>
-          <Link
-            to="/"
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-neutral-600 transition hover:bg-neutral-100 hover:text-neutral-800"
-          >
-            <ArrowLeft size={16} /> Voltar ao portal
-          </Link>
+          <div className="flex items-center gap-1">
+            {ehAdmin && (
+              <Link
+                to="/campanhas/configuracoes"
+                title="Configurações: templates e regras de interesse"
+                aria-label="Configurações"
+                className="inline-flex h-9 w-9 items-center justify-center text-neutral-500 transition hover:bg-neutral-100 hover:text-forest-900"
+              >
+                <Settings size={19} />
+              </Link>
+            )}
+            <Link
+              to="/"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-sm text-neutral-600 transition hover:bg-neutral-100 hover:text-neutral-800"
+            >
+              <ArrowLeft size={16} /> Voltar ao portal
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -741,19 +859,35 @@ export default function Campanhas() {
                 />
               </div>
             </Campo>
-            <Campo label="Quartos (mín)" flags={flagsAmbos}>
-              <select
-                className={campoCls(!!rascunho.quartosMin)}
-                value={rascunho.quartosMin}
-                onChange={(e) => set("quartosMin", e.target.value)}
-              >
-                <option value="">Qualquer</option>
-                {[1, 2, 3, 4].map((n) => (
-                  <option key={n} value={n}>
-                    {n}+
-                  </option>
-                ))}
-              </select>
+            <Campo label="Quartos (mín / máx)" flags={flagsAmbos}>
+              <div className="flex items-center gap-2">
+                <select
+                  className={campoCls(!!rascunho.quartosMin)}
+                  value={rascunho.quartosMin}
+                  onChange={(e) => set("quartosMin", e.target.value)}
+                  aria-label="Quartos mínimo"
+                >
+                  <option value="">Mín</option>
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <option key={n} value={n}>
+                      {n}+
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className={campoCls(!!rascunho.quartosMax)}
+                  value={rascunho.quartosMax}
+                  onChange={(e) => set("quartosMax", e.target.value)}
+                  aria-label="Quartos máximo"
+                >
+                  <option value="">Máx</option>
+                  {[1, 2, 3, 4, 5, 6].map((n) => (
+                    <option key={n} value={n}>
+                      até {n}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </Campo>
             <Campo label="Vagas (mín)" flags={flagsAmbos}>
               <select
@@ -789,10 +923,8 @@ export default function Campanhas() {
           )}
           {!rascunho.exigirImovel && (
             <div className="mb-2 border border-line bg-neutral-50 px-4 py-3 text-xs text-neutral-500">
-              Modo “todos os contatos”: valem fonte do contato, canal de aquisição, entrada e os
-              filtros de negócio (corretor, status, fase, negócio parado). Ao usar um filtro de
-              negócio, os campos de imóvel (bairro, tipo, preço, metragem, quartos, vagas, código,
-              status) passam a mirar o imóvel do negócio.
+              Modo “todos os contatos”: valem fonte do contato, canal de aquisição, entrada e as
+              condições de negócio (status, corretor, negócio parado).
             </div>
           )}
 
@@ -827,57 +959,24 @@ export default function Campanhas() {
             />
           </div>
 
-          {vistaVisivel && (
-            <>
-              <hr className="mt-6 border-t border-line-strong" />
-              <p className="mb-3 mt-6 text-xs font-semibold uppercase tracking-wider text-neutral-500">
-                Do negócio
-              </p>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <MultiSelect
-                  label="Status do negócio"
-                  flags={["vista"]}
-                  options={statusNegocioOpt}
-                  selected={rascunho.statusNegocio}
-                  onChange={(v) => set("statusNegocio", v)}
-                />
-                {faseVisivel && (
-                  <MultiSelect
-                    label="Fase do negócio"
-                    flags={["vista"]}
-                    options={fasesOpt}
-                    selected={rascunho.fases}
-                    onChange={(v) => set("fases", v)}
-                  />
-                )}
-                <MultiSelect
-                  label="Corretor do negócio"
-                  flags={["vista"]}
-                  options={corretoresOpt}
-                  selected={rascunho.corretores}
-                  onChange={(v) => set("corretores", v)}
-                />
-                <Campo label="Negócio parado há + (dias)" flags={["vista"]}>
-                  <input
-                    className={campoCls(!!rascunho.diasSemAtividade)}
-                    placeholder="Ex.: 30"
-                    inputMode="numeric"
-                    value={rascunho.diasSemAtividade}
-                    onChange={(e) => set("diasSemAtividade", e.target.value.replace(/\D/g, ""))}
-                  />
-                </Campo>
-              </div>
-            </>
-          )}
+          <hr className="mt-6 border-t border-line-strong" />
+          <p className="mb-3 mt-6 text-xs font-semibold uppercase tracking-wider text-neutral-500">
+            Do negócio
+          </p>
+          <ConstrutorNegocio
+            caixas={rascunho.condicoes}
+            onChange={setCondicoes}
+            statusOpt={statusNegocioOpt}
+            corretoresOpt={corretoresOpt}
+            fasesOpt={fasesOpt}
+            faseDisponivel={faseVisivel}
+          />
 
           {/* Chips das seleções múltiplas */}
           {(rascunho.bairros.length ||
             rascunho.tipos.length ||
             rascunho.statusImovel.length ||
-            rascunho.canais.length ||
-            rascunho.statusNegocio.length ||
-            rascunho.fases.length ||
-            rascunho.corretores.length) > 0 && (
+            rascunho.canais.length) > 0 && (
             <div className="mt-5 space-y-2">
               <Chips
                 values={[
@@ -885,9 +984,6 @@ export default function Campanhas() {
                   ...rascunho.tipos,
                   ...rascunho.statusImovel,
                   ...rascunho.canais,
-                  ...rascunho.statusNegocio,
-                  ...rascunho.fases,
-                  ...rascunho.corretores,
                 ]}
                 onRemove={(v) =>
                   setRascunho((r) => ({
@@ -896,9 +992,6 @@ export default function Campanhas() {
                     tipos: r.tipos.filter((x) => x !== v),
                     statusImovel: r.statusImovel.filter((x) => x !== v),
                     canais: r.canais.filter((x) => x !== v),
-                    statusNegocio: r.statusNegocio.filter((x) => x !== v),
-                    fases: r.fases.filter((x) => x !== v),
-                    corretores: r.corretores.filter((x) => x !== v),
                   }))
                 }
               />
@@ -960,6 +1053,8 @@ export default function Campanhas() {
                   ? "Aplique os filtros para gerar a lista."
                   : carregando
                   ? "Consultando a base..."
+                  : resultado?.buscaAtiva
+                  ? `${num(grupos.length)}${resultado.truncado ? "+" : ""} lead(s) na busca “${buscaAplicada}”, dentro dos ${num(resumo.totalLeads)} do filtro.`
                   : resultado?.truncado
                   ? `${num(resumo.totalLeads)} lead(s) no total · exibindo os primeiros ${num(grupos.length)}. Use “Copiar números” ou “Exportar planilha” para a lista completa.`
                   : `${num(resumo.totalLeads)} lead(s) · imóveis exibidos são os que bateram com o filtro`}
@@ -968,7 +1063,7 @@ export default function Campanhas() {
             <div className="flex flex-wrap items-center gap-3">
               <button
                 onClick={copiarNumeros}
-                disabled={!temResultado || baixando !== null}
+                disabled={selecionados === 0 || baixando !== null}
                 className="inline-flex items-center gap-2 border border-forest-900 px-4 py-2.5 text-sm font-medium text-forest-900 transition hover:bg-green-soft disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {baixando === "copia" ? (
@@ -981,13 +1076,13 @@ export default function Campanhas() {
                   </>
                 ) : (
                   <>
-                    <Copy size={15} /> Copiar números
+                    <Copy size={15} /> Copiar números ({num(selecionados)})
                   </>
                 )}
               </button>
               <button
                 onClick={exportar}
-                disabled={!temResultado || baixando !== null}
+                disabled={selecionados === 0 || baixando !== null}
                 className="inline-flex items-center gap-2 bg-green-accent px-4 py-2.5 text-sm font-medium text-white transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {baixando === "csv" ? (
@@ -996,28 +1091,118 @@ export default function Campanhas() {
                   </>
                 ) : (
                   <>
-                    <Download size={15} /> Exportar planilha
+                    <Download size={15} /> Exportar planilha ({num(selecionados)})
                   </>
                 )}
               </button>
             </div>
           </div>
 
+          {jaAplicou && (
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-line bg-neutral-50 px-6 py-3 text-sm">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-neutral-700">
+                  <strong className="text-forest-900">{num(selecionados)}</strong> de {num(resumo.totalLeads)} leads selecionados
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelecao(todosMarcados())}
+                  className="text-xs font-medium text-forest-900 underline-offset-2 hover:underline"
+                >
+                  Marcar todos
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelecao({ modo: "nenhum", excecoes: new Set() })}
+                  className="text-xs font-medium text-forest-900 underline-offset-2 hover:underline"
+                >
+                  Desmarcar todos
+                </button>
+              </div>
+              <div className="relative ml-auto w-full max-w-sm">
+                <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                <input
+                  className={`${inputBase} ${busca ? inputFilledCls : "border-line bg-white text-neutral-800 hover:border-forest-900"} pl-8 pr-8`}
+                  placeholder="Buscar na lista por nome ou telefone…"
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                />
+                {busca && (
+                  <button
+                    type="button"
+                    onClick={() => setBusca("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700"
+                    title="Limpar busca"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+              {resultado?.buscaAtiva && (
+                <p className="w-full text-xs text-neutral-500">
+                  A busca só ajuda a conferir e marcar leads. Os totais, “Copiar números” e “Exportar planilha” continuam
+                  valendo para todos os leads <strong>marcados</strong> do filtro, achados pela busca ou não.
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-left text-sm">
+            <table className="w-full min-w-[1000px] text-left text-sm">
               <thead>
                 <tr className="border-b border-line-strong bg-neutral-50 text-xs uppercase tracking-wider text-neutral-500">
-                  <th className="px-6 py-3 font-medium">Lead</th>
+                  <th className="w-10 py-3 pl-6 pr-0 font-medium">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 cursor-pointer accent-[#0b3d2e]"
+                      aria-label="Marcar ou desmarcar os leads da tela"
+                      title="Marcar ou desmarcar os leads que estão na tela"
+                      disabled={grupos.length === 0}
+                      checked={todosVisiveisMarcados}
+                      ref={(el) => {
+                        if (el) el.indeterminate = visiveisMarcados > 0 && !todosVisiveisMarcados;
+                      }}
+                      onChange={() => marcarVisiveis(!todosVisiveisMarcados)}
+                    />
+                  </th>
+                  <th className="px-4 py-3 font-medium">
+                    <BotaoOrdem
+                      rotulo="Lead"
+                      ativo={ordem === "lead_asc" ? "asc" : ordem === "lead_desc" ? "desc" : null}
+                      dica="Ordenar por nome (A–Z / Z–A)"
+                      onClick={() => setOrdem(ordem === "lead_asc" ? "lead_desc" : "lead_asc")}
+                    />
+                  </th>
                   <th className="px-4 py-3 font-medium">Telefone</th>
                   <th className="px-4 py-3 font-medium">Imóvel(is) de interesse</th>
-                  <th className="px-4 py-3 font-medium">Entrada</th>
+                  <th className="px-4 py-3 font-medium">Status do negócio</th>
+                  <th className="px-4 py-3 font-medium">
+                    <BotaoOrdem
+                      rotulo="Entrada"
+                      ativo={ordem === "entrada_asc" ? "asc" : ordem === "entrada_desc" ? "desc" : null}
+                      dica="Ordenar por data de entrada (mais novos / mais antigos primeiro)"
+                      onClick={() => setOrdem(ordem === "entrada_desc" ? "entrada_asc" : "entrada_desc")}
+                    />
+                  </th>
                   <th className="px-6 py-3 font-medium">Canal de aquisição</th>
                 </tr>
               </thead>
               <tbody>
                 {grupos.map((g) => (
-                  <tr key={g.id} className="border-b border-line last:border-0 hover:bg-neutral-50">
-                    <td className="px-6 py-4">
+                  <tr
+                    key={g.id}
+                    className={`border-b border-line last:border-0 hover:bg-neutral-50 ${estaMarcado(g.id) ? "" : "bg-neutral-50/70 opacity-60"}`}
+                  >
+                    <td className="w-10 py-4 pl-6 pr-0 align-top">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4 cursor-pointer accent-[#0b3d2e]"
+                        aria-label={`Selecionar ${g.nome}`}
+                        checked={estaMarcado(g.id)}
+                        onChange={() => alternarLead(g.id)}
+                      />
+                    </td>
+                    <td className="px-4 py-4">
                       <div className="font-medium text-neutral-800">{g.nome}</div>
                       {g.email && <div className="text-xs text-neutral-400">{g.email}</div>}
                       {g.sistemas.length > 0 && (
@@ -1037,7 +1222,15 @@ export default function Campanhas() {
                         </div>
                       )}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-4 text-neutral-600">{g.telefone}</td>
+                    <td className="whitespace-nowrap px-4 py-4 text-neutral-600">
+                      {g.telefone ? (
+                        formatarTelefone(g.telefone)
+                      ) : (
+                        <span className="text-xs text-neutral-400" title="Este cliente não tem telefone cadastrado">
+                          Sem telefone
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-4">
                       {g.imoveis.length === 0 ? (
                         <span className="text-xs text-neutral-400">Sem imóvel relacionado</span>
@@ -1060,6 +1253,15 @@ export default function Campanhas() {
                           ))}
                         </div>
                       )}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-4">
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${
+                          STATUS_NEGOCIO_COR[g.statusNegocio] ?? STATUS_NEGOCIO_COR["Sem negócio"]
+                        }`}
+                      >
+                        {g.statusNegocio}
+                      </span>
                     </td>
                     <td className="whitespace-nowrap px-4 py-4 text-neutral-600">
                       {dataEntradaBR(g.entrada)}
@@ -1084,7 +1286,7 @@ export default function Campanhas() {
                 ))}
                 {carregando && (
                   <tr>
-                    <td colSpan={5} className="px-6 py-16 text-center text-neutral-400">
+                    <td colSpan={7} className="px-6 py-16 text-center text-neutral-400">
                       <Loader2 size={20} className="mx-auto mb-2 animate-spin" />
                       Consultando a base de clientes...
                     </td>
@@ -1092,9 +1294,11 @@ export default function Campanhas() {
                 )}
                 {!carregando && grupos.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-6 py-16 text-center text-neutral-400">
+                    <td colSpan={7} className="px-6 py-16 text-center text-neutral-400">
                       {jaAplicou
-                        ? "Nenhum lead corresponde aos filtros aplicados."
+                        ? buscaAplicada
+                        ? "Nenhum lead da lista corresponde à busca."
+                        : "Nenhum lead corresponde aos filtros aplicados."
                         : "Defina os filtros acima e clique em “Aplicar filtros” para gerar a lista."}
                     </td>
                   </tr>
@@ -1169,6 +1373,49 @@ export default function Campanhas() {
         </div>
       )}
 
+      {/* Modal: números para copiar (quando o navegador não deixa copiar sozinho) */}
+      {numerosModal !== null && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md border border-line-strong bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-line-strong px-6 py-4">
+              <h2 className="font-title text-lg font-semibold text-forest-900">Números prontos para copiar</h2>
+              <button onClick={() => setNumerosModal(null)} className="text-neutral-400 transition hover:text-neutral-700">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="space-y-3 px-6 py-5">
+              <p className="text-sm text-neutral-600">
+                O navegador não permitiu copiar sozinho. São <strong>{num(numerosModal ? numerosModal.split("\n").length : 0)}</strong>{" "}
+                números; clique em “Copiar” ou baixe o arquivo.
+              </p>
+              <textarea readOnly className={`${inputCls} h-40 font-mono text-xs`} value={numerosModal} onFocus={(e) => e.currentTarget.select()} />
+            </div>
+            <div className="flex items-center justify-end gap-3 border-t border-line-strong px-6 py-4">
+              <button
+                onClick={() => {
+                  const blob = new Blob([numerosModal ?? ""], { type: "text/plain;charset=utf-8" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `numeros-${new Date().toISOString().slice(0, 10)}.txt`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                className="border border-line-strong px-4 py-2 text-sm font-medium text-neutral-700 transition hover:bg-neutral-100"
+              >
+                Baixar .txt
+              </button>
+              <button
+                onClick={() => navigator.clipboard?.writeText(numerosModal ?? "").then(() => setNumerosModal(null)).catch(() => {})}
+                className="inline-flex items-center gap-2 bg-forest-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-forest-800"
+              >
+                <Copy size={15} /> Copiar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modal confirmar exclusão de perfil salvo */}
       {confirmarPerfil && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
@@ -1202,6 +1449,32 @@ export default function Campanhas() {
         </div>
       )}
     </div>
+  );
+}
+
+// Cabeçalho de coluna clicável com a seta da ordenação atual.
+function BotaoOrdem({
+  rotulo,
+  ativo,
+  dica,
+  onClick,
+}: {
+  rotulo: string;
+  ativo: "asc" | "desc" | null;
+  dica: string;
+  onClick: () => void;
+}) {
+  const Icone = ativo === "asc" ? ArrowUp : ativo === "desc" ? ArrowDown : ArrowUpDown;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={dica}
+      className={`inline-flex items-center gap-1 uppercase tracking-wider transition hover:text-forest-900 ${ativo ? "text-forest-900" : ""}`}
+    >
+      {rotulo}
+      <Icone size={13} className={ativo ? "" : "text-neutral-300"} />
+    </button>
   );
 }
 
@@ -1348,7 +1621,7 @@ function BarChartCard({
 }
 
 function exportarCSV(grupos: LeadGrupo[], finalidade: Finalidade) {
-  const cabecalho = ["Nome", "Telefone", "E-mail", "Fonte", "Imoveis de interesse", "Data de entrada", "Canal de aquisicao"];
+  const cabecalho = ["Nome", "Telefone", "E-mail", "Fonte", "Imoveis de interesse", "Status do negocio", "Data de entrada", "Canal de aquisicao"];
   const escapar = (s: string) => `"${s.replace(/"/g, '""')}"`;
   const linhasCsv = grupos.map((g) => {
     const imv = g.imoveis
@@ -1356,7 +1629,7 @@ function exportarCSV(grupos: LeadGrupo[], finalidade: Finalidade) {
       .join(" | ");
     const canal = g.canais.length ? g.canais.join(" | ") : "Sem canal definido";
     const fontes = g.sistemas.map((s) => SISTEMA_LABEL[s] ?? s).join(" | ");
-    return [g.nome, g.telefone, g.email, fontes, imv, dataEntradaBR(g.entrada), canal]
+    return [g.nome, formatarTelefone(g.telefone), g.email, fontes, imv, g.statusNegocio, dataEntradaBR(g.entrada), canal]
       .map((c) => escapar(String(c)))
       .join(",");
   });

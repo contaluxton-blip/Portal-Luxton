@@ -12,7 +12,10 @@ export type TipoLogCliente =
   | "perfil_salvo"
   | "perfil_editado"
   | "perfil_excluido"
-  | "buscou_usuario";
+  | "buscou_usuario"
+  | "entrou_config_templates"
+  | "template_salvo"
+  | "template_excluido";
 
 // Tipos gravados pela Edge Function admin-users (não dá para forjar pelo navegador).
 export type TipoLogServidor =
@@ -20,7 +23,11 @@ export type TipoLogServidor =
   | "usuario_reativado"
   | "usuario_desativado"
   | "senha_redefinida"
-  | "usuario_excluido";
+  | "usuario_excluido"
+  | "template_testado"
+  | "template_retroativo"
+  | "template_retroativo_concluido"
+  | "campanhas_atualizadas";
 
 export type TipoLog = TipoLogCliente | TipoLogServidor;
 
@@ -37,6 +44,13 @@ export const LOG_TIPOS: { tipo: TipoLog; label: string; cor: string }[] = [
   { tipo: "perfil_editado", label: "Editou perfil", cor: "bg-violet-50 text-violet-700 ring-violet-600/20" },
   { tipo: "perfil_excluido", label: "Excluiu perfil", cor: "bg-red-50 text-red-700 ring-red-600/20" },
   { tipo: "buscou_usuario", label: "Buscou usuário", cor: "bg-neutral-100 text-neutral-700 ring-neutral-500/20" },
+  { tipo: "entrou_config_templates", label: "Entrou em Configurações de templates", cor: "bg-blue-50 text-blue-700 ring-blue-600/20" },
+  { tipo: "template_salvo", label: "Salvou template", cor: "bg-indigo-50 text-indigo-700 ring-indigo-600/20" },
+  { tipo: "template_testado", label: "Testou template", cor: "bg-indigo-50 text-indigo-700 ring-indigo-600/20" },
+  { tipo: "template_retroativo", label: "Iniciou interesse retroativo", cor: "bg-indigo-50 text-indigo-700 ring-indigo-600/20" },
+  { tipo: "template_retroativo_concluido", label: "Concluiu interesse retroativo", cor: "bg-indigo-50 text-indigo-700 ring-indigo-600/20" },
+  { tipo: "template_excluido", label: "Excluiu template", cor: "bg-red-50 text-red-700 ring-red-600/20" },
+  { tipo: "campanhas_atualizadas", label: "Atualizou os dados de Campanhas", cor: "bg-indigo-50 text-indigo-700 ring-indigo-600/20" },
   { tipo: "usuario_criado", label: "Criou usuário", cor: "bg-amber-50 text-amber-700 ring-amber-600/20" },
   { tipo: "usuario_reativado", label: "Reativou usuário", cor: "bg-amber-50 text-amber-700 ring-amber-600/20" },
   { tipo: "usuario_desativado", label: "Desativou usuário", cor: "bg-amber-50 text-amber-700 ring-amber-600/20" },
