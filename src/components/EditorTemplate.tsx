@@ -91,6 +91,20 @@ function Destacado({ texto, codigo }: { texto: string; codigo: string | null }) 
   );
 }
 
+// Uma pergunta do cadastro, separada das outras por uma linha.
+function Bloco({ titulo, opcional, ajuda, children }: { titulo: string; opcional?: boolean; ajuda?: string; children: React.ReactNode }) {
+  return (
+    <div className="border-t border-line py-6 first:border-t-0 first:pt-0">
+      <label className="mb-1 block text-sm font-semibold text-forest-900">
+        {titulo} {opcional && <span className="font-normal text-neutral-400">(opcional)</span>}
+      </label>
+      {ajuda && <p className="mb-3 text-xs text-neutral-500">{ajuda}</p>}
+      {!ajuda && <div className="mb-2" />}
+      {children}
+    </div>
+  );
+}
+
 // Cartão de uma etapa do fluxo.
 function Passo(p: {
   n: number;
@@ -540,8 +554,7 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                 onToggle={() => setAberta(aberta === 1 ? 0 : 1)}
               >
                 {ehPadrao && padrao && (
-                  <div className="mb-5">
-                    <label className={rotuloCls}>Mensagem do template no RealMate</label>
+                  <Bloco titulo="Mensagem do template no RealMate">
                     <pre className="max-h-40 overflow-auto whitespace-pre-wrap border border-line bg-neutral-50 p-3 text-xs text-neutral-700">
                       {padrao.texto || "(sem texto)"}
                     </pre>
@@ -549,17 +562,16 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                       {num(padrao.msgs)} mensagem(ns) deste template já guardada(s). O sistema reconhece o template
                       pelo próprio RealMate, então não precisa de palavras-chave.
                     </p>
-                  </div>
+                  </Bloco>
                 )}
 
                 {!ehPadrao && (
-                  <div className="mb-6 grid grid-cols-1 gap-5 sm:grid-cols-2">
-                    <div>
-                      <label className={rotuloCls}>Nome do template</label>
+                  <>
+                    <Bloco titulo="Nome do template">
                       <input className={campoCls} value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex.: Anúncio do Facebook" />
-                    </div>
-                    <div>
-                      <label className={rotuloCls}>De onde vem esse lead?</label>
+                    </Bloco>
+
+                    <Bloco titulo="De onde vem esse lead?">
                       <select
                         className={campoCls}
                         value={canalOutro ? "__outro" : canal}
@@ -582,10 +594,12 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                       {canalOutro && (
                         <input className={`${campoCls} mt-2`} value={canal} onChange={(e) => setCanal(e.target.value)} placeholder="Digite o nome do canal" />
                       )}
-                    </div>
+                    </Bloco>
 
-                    <div className="sm:col-span-2">
-                      <label className={rotuloCls}>A mensagem precisa conter…</label>
+                    <Bloco
+                      titulo="A mensagem precisa conter…"
+                      ajuda="Palavras ou frases que sempre aparecem nesse tipo de mensagem. Se colocar mais de uma, a mensagem precisa ter todas. Maiúsculas e minúsculas não importam."
+                    >
                       <div className="flex flex-wrap items-center gap-2">
                         {sinais.map((s) => (
                           <span key={s} className="inline-flex items-center gap-1 border border-line bg-green-soft px-2.5 py-1 text-sm text-forest-800">
@@ -605,29 +619,14 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                               addSinal();
                             }
                           }}
-                          placeholder="Digite uma palavra ou frase e tecle Enter"
+                          placeholder="Digite e tecle Enter"
                         />
                       </div>
-                      <div className="mt-2 flex flex-wrap gap-2 text-xs">
-                        <span className="text-neutral-500">Atalhos:</span>
-                        <button type="button" onClick={() => addSinal("ANÚNCIO | FACEBOOK")} className="border border-line-strong px-2.5 py-1 text-forest-900 hover:bg-green-soft">
-                          + veio de anúncio do Facebook
-                        </button>
-                        <button type="button" onClick={() => addSinal("ANÚNCIO | INSTAGRAM")} className="border border-line-strong px-2.5 py-1 text-forest-900 hover:bg-green-soft">
-                          + veio de anúncio do Instagram
-                        </button>
-                      </div>
-                      <p className={ajudaCls}>
-                        Use palavras que sempre aparecem nesse tipo de mensagem (por exemplo, o nome do portal). Se
-                        colocar mais de uma, a mensagem precisa ter todas. Maiúsculas e minúsculas não importam.
-                      </p>
-                    </div>
-                  </div>
+                    </Bloco>
+                  </>
                 )}
 
-                {/* como achar o código */}
-                <div>
-                  <label className={rotuloCls}>Como achar o código do imóvel na mensagem?</label>
+                <Bloco titulo="Como achar o código do imóvel na mensagem?">
                   {modo === "especial" ? (
                     <div className="border border-line bg-neutral-50 p-4 text-sm text-neutral-700">
                       Este template usa uma <strong>regra especial</strong>, configurada pela equipe técnica, e
@@ -690,29 +689,29 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                           </span>
                         </label>
                       </div>
-
-                      <div className="mt-4 border border-line bg-neutral-50 p-3">
-                        <label className="mb-1.5 block text-xs font-medium text-neutral-600">Quer conferir? Cole uma mensagem de exemplo</label>
-                        <textarea className={`${campoCls} min-h-[64px]`} value={exemplo} onChange={(e) => setExemplo(e.target.value)} placeholder="Ex.: Pavilhão Industrial | Guaíba — R$ 10.000.000 | Cód. 39227" />
-                        {exemplo.trim() && (
-                          <p className={`mt-2 text-sm ${exemploAchado ? "text-forest-800" : "text-amber-800"}`}>
-                            {exemploAchado ? (
-                              <>✓ Código encontrado: <strong>{exemploAchado.codigo}</strong> <span className="text-neutral-500">({exemploAchado.como})</span></>
-                            ) : (
-                              "Nenhum código encontrado nessa mensagem com as opções escolhidas."
-                            )}
-                          </p>
-                        )}
-                      </div>
                     </>
                   )}
-                </div>
+                </Bloco>
+
+                {modo !== "especial" && (
+                  <Bloco titulo="Quer conferir?" opcional ajuda="Cole uma mensagem de exemplo e veja se o código é encontrado.">
+                    <textarea className={`${campoCls} min-h-[64px]`} value={exemplo} onChange={(e) => setExemplo(e.target.value)} placeholder="Ex.: Pavilhão Industrial | Guaíba — R$ 10.000.000 | Cód. 39227" />
+                    {exemplo.trim() && (
+                      <p className={`mt-2 text-sm ${exemploAchado ? "text-forest-800" : "text-amber-800"}`}>
+                        {exemploAchado ? (
+                          <>✓ Código encontrado: <strong>{exemploAchado.codigo}</strong> <span className="text-neutral-500">({exemploAchado.como})</span></>
+                        ) : (
+                          "Nenhum código encontrado nessa mensagem com as opções escolhidas."
+                        )}
+                      </p>
+                    )}
+                  </Bloco>
+                )}
 
                 {!ehPadrao && (
-                  <div className="mt-5">
-                    <label className={rotuloCls}>Anotações <span className="font-normal text-neutral-400">(opcional)</span></label>
+                  <Bloco titulo="Anotações" opcional>
                     <textarea className={`${campoCls} min-h-[60px]`} value={notas} onChange={(e) => setNotas(e.target.value)} placeholder="Algo que ajude a equipe a lembrar para que serve este template" />
-                  </div>
+                  </Bloco>
                 )}
 
                 {emUso && alterado && (
