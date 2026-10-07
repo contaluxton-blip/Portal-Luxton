@@ -19,6 +19,18 @@ async function rpc<T>(nome: string, params?: Record<string, unknown>): Promise<T
 // Chaves de telefone ignoradas (quem acessa Campanhas pode ler).
 export const chavesIgnoradas = async (): Promise<Set<string>> => new Set(await rpc<string[]>("ignorados_chaves"));
 
+export type ContatoBusca = {
+  chave: string;
+  telefone: string;
+  nome: string | null;
+  em_realmate: boolean;
+  em_vista: boolean;
+  ja_ignorado: boolean;
+};
+
+// Busca contatos do RealMate/Vista por telefone (inteiro ou parte) ou por nome.
+export const buscarContatos = (q: string) => rpc<ContatoBusca[]>("ignorados_buscar_contatos", { p_q: q });
+
 export const listarIgnorados = () => rpc<Ignorado[]>("ignorados_listar");
 
 export const adicionarIgnorados = (itens: { telefone: string; nome?: string }[], motivo?: string) =>

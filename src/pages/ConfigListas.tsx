@@ -18,7 +18,14 @@ import { LuxtonMark } from "../components/Logo";
 import { AbasConfig } from "../components/AbasConfig";
 import { num } from "../lib/format";
 import { chaveTelefone, formatarTelefone } from "../lib/telefone";
-import { adicionarIgnorados, listarIgnorados, removerIgnorados, type Ignorado } from "../lib/ignoradosApi";
+import {
+  adicionarIgnorados,
+  buscarContatos,
+  listarIgnorados,
+  removerIgnorados,
+  type ContatoBusca,
+  type Ignorado,
+} from "../lib/ignoradosApi";
 
 const POR_PAGINA = 10;
 const campoCls =
@@ -48,6 +55,12 @@ export default function ConfigListas() {
   const [lista, setLista] = useState<Ignorado[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [texto, setTexto] = useState("");
+  const [varios, setVarios] = useState(false);
+  // busca de contato por telefone/nome
+  const [q, setQ] = useState("");
+  const [achados, setAchados] = useState<ContatoBusca[] | null>(null);
+  const [buscando, setBuscando] = useState(false);
+  const [addingChave, setAddingChave] = useState<string | null>(null);
   const [motivo, setMotivo] = useState("");
   const [adicionando, setAdicionando] = useState(false);
   const [resultado, setResultado] = useState<string | null>(null);
@@ -68,6 +81,47 @@ export default function ConfigListas() {
   useEffect(() => {
     carregar();
   }, [carregar]);
+
+  useEffect(() => {
+    const termo = q.trim();
+    const digitos = termo.replace(/\D/g, "");
+    const pesquisavel = /[A-Za-zÀ-ÿ]/.test(termo) ? termo.length >= 3 : digitos.length >= 4;
+    if (!pesquisavel) {
+      setAchados(null);
+      setBuscando(false);
+      return;
+    }
+    let ativo = true;
+    setBuscando(true);
+    const t = setTimeout(() => {
+      buscarContatos(termo)
+        .then((r) => ativo && setAchados(r))
+        .catch((e) => ativo && setErro((e as Error).message))
+        .finally(() => ativo && setBuscando(false));
+    }, 400);
+    return () => {
+      ativo = false;
+      clearTimeout(t);
+    };
+  }, [q]);
+
+  // Clicar no contato achado = colocá-lo na lista de ignorados.
+  const ignorarContato = async (c: { telefone: string; nome: string | null; chave: string }) => {
+    setAddingChave(c.chave);
+    setErro(null);
+    setResultado(null);
+    try {
+      const r = await adicionarIgnorados([{ telefone: c.telefone, ...(c.nome ? { nome: c.nome } : {}) }], motivo);
+      setResultado(r.adicionados > 0 ? `${c.nome || formatarTelefone(c.telefone)} entrou na lista de ignorados.` : "Esse contato já estava na lista.");
+      setAchados((lst) => (lst ? lst.map((x) => (x.chave === c.chave ? { ...x, ja_ignorado: true } : x)) : lst));
+      setPagina(1);
+      await carregar();
+    } catch (e) {
+      setErro((e as Error).message);
+    } finally {
+      setAddingChave(null);
+    }
+  };
 
   const linhas = useMemo(() => lerLinhas(texto), [texto]);
   const validas = linhas.filter((l) => chaveTelefone(l.telefone)).length;
@@ -190,38 +244,137 @@ export default function ConfigListas() {
 
           <div className="grid grid-cols-1 gap-6 px-6 py-5 lg:grid-cols-2">
             <div>
-              <label className="mb-1 block text-sm font-semibold text-forest-900">Adicionar contatos</label>
+              <label className="mb-1 block text-sm font-semibold text-forest-900">Buscar contato para ignorar</label>
               <p className="mb-2 text-xs text-neutral-500">
-                Um telefone por linha. Se quiser, escreva o nome junto; se não escrever, o sistema procura o nome no
-                RealMate e no Vista.
+                Digite o <strong>telefone</strong> (inteiro ou só um pedaço) ou o nome. Ao achar, é só clicar no contato.
               </p>
-              <textarea
-                className={`${campoCls} min-h-[120px] font-mono text-xs`}
-                value={texto}
-                onChange={(e) => setTexto(e.target.value)}
-                placeholder={"(51) 99999-0000\nMaria Silva 51 98888-1111\n+55 51 97777-2222 - João"}
-              />
+              <div className="relative">
+                <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                <input
+                  className={`${campoCls} pl-8 pr-8`}
+                  value={q}
+                  onChange={(e) => {
+                    setQ(e.target.value);
+                    setResultado(null);
+                  }}
+                  placeholder="Ex.: 99200-4129  ou  Maria Silva"
+                  inputMode="search"
+                  autoComplete="off"
+                />
+                {buscando ? (
+                  <Loader2 size={14} className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin text-neutral-400" />
+                ) : (
+                  q && (
+                    <button onClick={() => setQ("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700" title="Limpar">
+                      <X size={14} />
+                    </button>
+                  )
+                )}
+              </div>
               <input
                 className={`${campoCls} mt-2`}
                 value={motivo}
                 onChange={(e) => setMotivo(e.target.value)}
                 placeholder="Motivo (opcional), ex.: pediu para não receber mais mensagens"
               />
-              <div className="mt-3 flex flex-wrap items-center gap-3">
-                <button onClick={adicionar} disabled={adicionando || validas === 0} className={btnPrimario}>
-                  {adicionando ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />} Adicionar à lista
-                </button>
-                {linhas.length > 0 && (
-                  <span className="text-xs text-neutral-500">
-                    {num(validas)} telefone(s) reconhecido(s){linhas.length > validas ? ` · ${num(linhas.length - validas)} sem telefone válido` : ""}
-                  </span>
-                )}
-              </div>
+
+              {achados !== null && (
+                <div className="mt-3 border border-line">
+                  {achados.length === 0 ? (
+                    <div className="px-4 py-4 text-sm text-neutral-500">
+                      Nenhum contato encontrado.
+                      {(() => {
+                        const k = chaveTelefone(q);
+                        return k && !/[A-Za-zÀ-ÿ]/.test(q) ? (
+                          <button
+                            onClick={() => ignorarContato({ telefone: q, nome: null, chave: k })}
+                            disabled={addingChave === k}
+                            className="mt-2 flex items-center gap-1.5 text-xs font-medium text-forest-900 underline-offset-2 hover:underline disabled:opacity-40"
+                          >
+                            <Plus size={13} /> Adicionar o número {formatarTelefone(q)} mesmo assim
+                          </button>
+                        ) : null;
+                      })()}
+                    </div>
+                  ) : (
+                    <ul className="max-h-72 divide-y divide-line overflow-y-auto">
+                      {achados.map((c) => (
+                        <li key={c.chave}>
+                          <button
+                            type="button"
+                            onClick={() => !c.ja_ignorado && ignorarContato(c)}
+                            disabled={c.ja_ignorado || addingChave === c.chave}
+                            className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition ${
+                              c.ja_ignorado ? "cursor-default bg-neutral-50" : "hover:bg-green-soft"
+                            } disabled:opacity-70`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-medium text-neutral-800">
+                                {c.nome || <span className="font-normal text-neutral-400">sem nome cadastrado</span>}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-1.5 text-xs text-neutral-500">
+                                {formatarTelefone(c.telefone)}
+                                {c.em_realmate && <span className="bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 ring-1 ring-inset ring-blue-600/20">RealMate</span>}
+                                {c.em_vista && <span className="bg-violet-50 px-1.5 py-0.5 text-[10px] font-medium text-violet-700 ring-1 ring-inset ring-violet-600/20">Vista</span>}
+                              </div>
+                            </div>
+                            {c.ja_ignorado ? (
+                              <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-neutral-500">
+                                <Check size={13} /> Na lista
+                              </span>
+                            ) : addingChave === c.chave ? (
+                              <Loader2 size={15} className="shrink-0 animate-spin text-forest-900" />
+                            ) : (
+                              <span className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-forest-900">
+                                <Ban size={13} /> Ignorar
+                              </span>
+                            )}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
               {resultado && (
                 <div className="mt-3 flex items-center gap-2 border border-line bg-green-soft px-3 py-2 text-sm text-forest-800">
                   <Check size={15} /> {resultado}
                 </div>
               )}
+
+              <div className="mt-4 border-t border-line pt-3">
+                <button
+                  type="button"
+                  onClick={() => setVarios((v) => !v)}
+                  className="text-xs font-medium text-forest-900 underline-offset-2 hover:underline"
+                >
+                  {varios ? "Esconder" : "Adicionar vários de uma vez (colar uma lista de telefones)"}
+                </button>
+                {varios && (
+                  <div className="mt-2">
+                    <p className="mb-2 text-xs text-neutral-500">
+                      Um telefone por linha; o nome é opcional (se faltar, o sistema procura no RealMate e no Vista).
+                    </p>
+                    <textarea
+                      className={`${campoCls} min-h-[100px] font-mono text-xs`}
+                      value={texto}
+                      onChange={(e) => setTexto(e.target.value)}
+                      placeholder={"(51) 99999-0000\nMaria Silva 51 98888-1111\n+55 51 97777-2222 - João"}
+                    />
+                    <div className="mt-2 flex flex-wrap items-center gap-3">
+                      <button onClick={adicionar} disabled={adicionando || validas === 0} className={btnPrimario}>
+                        {adicionando ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />} Adicionar à lista
+                      </button>
+                      {linhas.length > 0 && (
+                        <span className="text-xs text-neutral-500">
+                          {num(validas)} telefone(s) reconhecido(s)
+                          {linhas.length > validas ? ` · ${num(linhas.length - validas)} sem telefone válido` : ""}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="border border-line bg-neutral-50 p-4 text-sm text-neutral-600">
@@ -229,7 +382,7 @@ export default function ConfigListas() {
               <ul className="list-disc space-y-1 pl-5">
                 <li>O contato ignorado <strong>não some</strong> da campanha: aparece com a marca “Ignorado” e desmarcado.</li>
                 <li>Quem quiser incluir mesmo assim marca a caixinha dele na campanha.</li>
-                <li>Também dá para ignorar um contato direto na lista de uma campanha, pelo botão ao lado do nome.</li>
+                <li>Também dá para ignorar um contato direto na lista de uma campanha, pelo ícone ao lado do nome.</li>
                 <li>Tirar da lista é só selecionar abaixo e remover.</li>
               </ul>
             </div>
