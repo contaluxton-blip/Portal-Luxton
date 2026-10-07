@@ -3,6 +3,8 @@ import {
   AlertTriangle,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   FlaskConical,
   History,
   Loader2,
@@ -27,7 +29,6 @@ import {
   listarNaoPadrao,
   listarPadrao,
   obterTeste,
-  passoRetroativo,
   salvarNaoPadrao,
   salvarPadrao,
   testarTemplate,
@@ -64,6 +65,14 @@ const btnPrimario =
   "inline-flex items-center gap-2 bg-forest-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-forest-800 disabled:cursor-not-allowed disabled:opacity-40";
 const btnSecundario =
   "inline-flex items-center gap-2 border border-forest-900 px-5 py-2.5 text-sm font-medium text-forest-900 transition hover:bg-green-soft disabled:cursor-not-allowed disabled:opacity-40";
+
+const POR_PAGINA = 10;
+const duracao = (min: number) => {
+  if (min < 60) return `${num(Math.max(1, Math.round(min)))} min`;
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return m ? `${num(h)} h ${m} min` : `${num(h)} h`;
+};
 
 const dataHora = (iso: string) => new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 
@@ -154,17 +163,19 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
   const [teste, setTeste] = useState<TesteSalvo | null>(null);
   const [soProblemas, setSoProblemas] = useState(false);
   const [aprovando, setAprovando] = useState(false);
+  const [prog, setProg] = useState<{ lidas: number; total: number; msgs: number } | null>(null);
+  const [pagina, setPagina] = useState(1);
+  const pararTeste = useRef(false);
 
   // ---- etapas 4 e 5: passado ----
   const [periodo, setPeriodo] = useState("30");
-  const [estimativa, setEstimativa] = useState<{ sessoes: number; minutos: number } | null>(null);
+  const [estimativa, setEstimativa] = useState<{ sessoes: number; minutos: number; soAnuncios: boolean } | null>(null);
   const [job, setJob] = useState<JobRetro | null>(null);
-  const [rodando, setRodando] = useState(false);
+  const [iniciando, setIniciando] = useState(false);
   const [erroRetro, setErroRetro] = useState<string | null>(null);
   const [atualizando, setAtualizando] = useState(false);
   const [campanhasOk, setCampanhasOk] = useState(false);
   const [ligando, setLigando] = useState(false);
-  const parar = useRef(false);
 
   const forma = useMemo(
     () => ({ nome, canal, sinais, notas, modo, palavras, link, isolado }),
@@ -246,10 +257,38 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
 
   // estimativa de tempo do passado
   useEffect(() => {
-    if (aberta !== 4) return;
+    if (aberta !== 4 || !idAtual) return;
     setEstimativa(null);
-    estimarRetroativo(desdeDo(periodo)).then(setEstimativa).catch(() => {});
-  }, [aberta, periodo]);
+    estimarRetroativo(tipo, idAtual, desdeDo(periodo)).then(setEstimativa).catch(() => {});
+  }, [aberta, periodo, idAtual, tipo]);
+
+  // A atualização do passado roda sozinha no servidor (em segundo plano). Aqui só se acompanha o andamento.
+  const rodando = job?.status === "rodando";
+  useEffect(() => {
+    if (!idAtual || !rodando) return;
+    let vivo = true;
+    const t = setInterval(async () => {
+      try {
+        const j = await ultimoRetroativo(tipo, idAtual);
+        if (!vivo) return;
+        setJob(j);
+        if (j && j.status === "concluido") {
+          const it = await carregarItem(idAtual);
+          if (!vivo) return;
+          setItem(it);
+          onMudou();
+          setAberta(5);
+        }
+      } catch {
+        /* tenta de novo no próximo ciclo */
+      }
+    }, 4000);
+    return () => {
+      vivo = false;
+      clearInterval(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idAtual, rodando, job?.id]);
 
   // ---- estado do fluxo ----
   const salvo = !!item && item.etapa !== "sem_config";
@@ -301,26 +340,41 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
     }
   };
 
+  // Lê as conversas em rodadas curtas, mostrando o andamento, até acabar (ou o usuário parar).
   const rodarTeste = async (continuar: boolean) => {
     if (!idAtual) return;
     setTestando(true);
     setErroTeste(null);
+    pararTeste.current = false;
+    let offset = continuar ? teste?.resumo?.sessoes_lidas ?? 0 : 0;
+    setProg({ lidas: offset, total: continuar ? teste?.resumo?.total_sessoes ?? 0 : 0, msgs: continuar ? teste?.resumo?.casaram ?? 0 : 0 });
+    let leu = continuar;
     try {
-      await testarTemplate({
-        tipo,
-        templateId: idAtual,
-        dias,
-        offset: continuar ? teste?.resumo?.sessoes_lidas ?? 0 : 0,
-      });
-      await carregarTeste(idAtual);
-      const it = await carregarItem(idAtual);
-      setItem(it);
-      onMudou();
-      setAberta(3);
+      for (;;) {
+        const rd = await testarTemplate({ tipo, templateId: idAtual, dias, offset });
+        leu = true;
+        offset = rd.proximoOffset;
+        const t = await obterTeste(tipo, idAtual);
+        setTeste(t);
+        setProg({ lidas: offset, total: rd.totalSessoes, msgs: t.resumo?.casaram ?? 0 });
+        if (rd.sessoesLidas === 0 || offset >= rd.totalSessoes || pararTeste.current) break;
+      }
     } catch (e) {
       setErroTeste((e as Error).message);
     } finally {
+      if (leu) {
+        try {
+          await carregarTeste(idAtual);
+          setItem(await carregarItem(idAtual));
+          onMudou();
+          setPagina(1);
+          setAberta(3);
+        } catch {
+          /* mantém o que já está na tela */
+        }
+      }
       setTestando(false);
+      setProg(null);
     }
   };
 
@@ -341,56 +395,32 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
     }
   };
 
-  const correr = async (inicio: JobRetro) => {
-    parar.current = false;
-    setRodando(true);
-    setErroRetro(null);
-    let atual = inicio;
-    try {
-      while (atual.status === "rodando" && !parar.current) {
-        const r = await passoRetroativo(atual.id);
-        atual = r.job;
-        setJob(r.job);
-      }
-      if (atual.status === "concluido" && idAtual) {
-        setItem(await carregarItem(idAtual));
-        onMudou();
-        setAberta(5);
-      }
-    } catch (e) {
-      setErroRetro((e as Error).message);
-      if (idAtual) ultimoRetroativo(tipo, idAtual).then(setJob).catch(() => {});
-    } finally {
-      setRodando(false);
-    }
-  };
-
   const iniciarPassado = async () => {
     if (!idAtual) return;
     setErroRetro(null);
     setCampanhasOk(false);
-    setRodando(true);
+    setIniciando(true);
     try {
       const r = await iniciarRetroativo({ tipo, templateId: idAtual, desde: desdeDo(periodo) });
       setJob(r.job);
       setItem(await carregarItem(idAtual));
       onMudou();
-      await correr(r.job);
     } catch (e) {
       setErroRetro((e as Error).message);
-      setRodando(false);
+    } finally {
+      setIniciando(false);
     }
   };
 
   const pararPassado = async () => {
-    parar.current = true;
-    if (job) {
-      try {
-        const r = await cancelarRetroativo(job.id);
-        if (r.job) setJob(r.job);
-      } catch {
-        /* já terminou */
-      }
+    if (!job) return;
+    setErroRetro(null);
+    try {
+      const r = await cancelarRetroativo(job.id);
+      if (r.job) setJob(r.job);
+      else if (idAtual) setJob(await ultimoRetroativo(tipo, idAtual));
+    } catch (e) {
+      setErroRetro((e as Error).message);
     }
   };
 
@@ -436,7 +466,10 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
   };
 
   const linhas = teste?.amostra ?? [];
-  const visiveis = soProblemas ? linhas.filter((l) => !l.codigo || !l.imovel) : linhas;
+  const filtradas = soProblemas ? linhas.filter((l) => !l.codigo || !l.imovel) : linhas;
+  const totalPaginas = Math.max(1, Math.ceil(filtradas.length / POR_PAGINA));
+  const paginaAtual = Math.min(pagina, totalPaginas);
+  const visiveis = filtradas.slice((paginaAtual - 1) * POR_PAGINA, paginaAtual * POR_PAGINA);
   const r = teste?.resumo;
   const pct = job && job.total_sessoes > 0 ? Math.min(100, Math.round((job.sessoes_processadas / job.total_sessoes) * 100)) : 0;
   const padrao = ehPadrao ? (item as TemplatePadrao | null) : null;
@@ -713,7 +746,7 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                 onToggle={() => setAberta(aberta === 2 ? 0 : 2)}
               >
                 <p className="mb-4 text-sm text-neutral-600">
-                  Vamos ler as conversas mais recentes no RealMate e ver o que este template pegaria. <strong>Nada é
+                  Vamos ler no RealMate todas as conversas do período escolhido e ver o que este template pegaria. <strong>Nada é
                   gravado nem muda nos leads</strong>: serve só para você conferir.
                 </p>
                 <div className="mb-4 flex flex-wrap items-end gap-4">
@@ -727,9 +760,25 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                   </div>
                   <button onClick={() => rodarTeste(false)} disabled={testando} className={btnPrimario}>
                     {testando ? <Loader2 size={15} className="animate-spin" /> : <FlaskConical size={15} />}
-                    {testando ? "Lendo o RealMate… (até 2 min)" : testeOk ? "Testar de novo" : "Rodar teste"}
+                    {testando ? "Lendo o RealMate…" : testeOk ? "Testar de novo" : "Rodar teste"}
                   </button>
+                  {testando && (
+                    <button onClick={() => { pararTeste.current = true; }} className="inline-flex items-center gap-2 border border-red-400 px-5 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50">
+                      <X size={15} /> Parar e ver o que achou
+                    </button>
+                  )}
                 </div>
+                {testando && prog && (
+                  <div className="mb-4 border border-line bg-white p-4">
+                    <div className="h-2 w-full bg-neutral-100">
+                      <div className="h-2 bg-green-accent transition-all" style={{ width: `${prog.total > 0 ? Math.min(100, Math.round((prog.lidas / prog.total) * 100)) : 0}%` }} />
+                    </div>
+                    <div className="mt-2 text-xs text-neutral-600">
+                      {prog.total > 0 ? `${num(prog.lidas)} de ${num(prog.total)} conversas lidas` : "Começando a leitura…"} · {num(prog.msgs)} mensagem(ns) encontrada(s) até agora
+                    </div>
+                    <p className="mt-1 text-xs text-neutral-500">Fique nesta tela até terminar. Se preferir, clique em “Parar e ver o que achou” a qualquer momento.</p>
+                  </div>
+                )}
                 {erroTeste && (
                   <div className="flex items-start gap-2 border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
                     <AlertTriangle size={16} className="mt-0.5 shrink-0" /> {erroTeste}
@@ -756,7 +805,7 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                       <span className="bg-amber-50 px-2.5 py-1 text-amber-800">{num(r.sem_codigo)} sem código</span>
                       <span className="bg-red-50 px-2.5 py-1 text-red-700">{num(r.codigo_inexistente)} imóvel não encontrado no Vista</span>
                       <label className="ml-auto inline-flex cursor-pointer items-center gap-1.5 text-neutral-600">
-                        <input type="checkbox" className="accent-[#0b3d2e]" checked={soProblemas} onChange={(e) => setSoProblemas(e.target.checked)} />
+                        <input type="checkbox" className="accent-[#0b3d2e]" checked={soProblemas} onChange={(e) => { setSoProblemas(e.target.checked); setPagina(1); }} />
                         Mostrar só o que merece atenção
                       </label>
                     </div>
@@ -767,9 +816,9 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                         pouco usado: tente “Ler mais conversas” ou ajuste o cadastro.
                       </p>
                     ) : (
-                      <div className="max-h-[440px] overflow-auto border border-line">
+                      <div className="overflow-x-auto border border-line">
                         <table className="w-full min-w-[820px] text-left text-xs">
-                          <thead className="sticky top-0 bg-neutral-50 uppercase tracking-wider text-neutral-500">
+                          <thead className="bg-neutral-50 uppercase tracking-wider text-neutral-500">
                             <tr>
                               <th className="px-3 py-2 font-medium">Lead</th>
                               <th className="px-3 py-2 font-medium">Imóvel de interesse</th>
@@ -804,6 +853,32 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                             ))}
                           </tbody>
                         </table>
+                      </div>
+                    )}
+                    {filtradas.length > POR_PAGINA && (
+                      <div className="mt-2 flex items-center justify-end gap-3 text-xs text-neutral-600">
+                        <span>
+                          {num((paginaAtual - 1) * POR_PAGINA + 1)}–{num(Math.min(paginaAtual * POR_PAGINA, filtradas.length))} de {num(filtradas.length)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setPagina(paginaAtual - 1)}
+                          disabled={paginaAtual <= 1}
+                          className="border border-line-strong p-1.5 transition hover:bg-neutral-100 disabled:opacity-30"
+                          title="Anterior"
+                        >
+                          <ChevronLeft size={14} />
+                        </button>
+                        <span>Página {paginaAtual} de {totalPaginas}</span>
+                        <button
+                          type="button"
+                          onClick={() => setPagina(paginaAtual + 1)}
+                          disabled={paginaAtual >= totalPaginas}
+                          className="border border-line-strong p-1.5 transition hover:bg-neutral-100 disabled:opacity-30"
+                          title="Próxima"
+                        >
+                          <ChevronRight size={14} />
+                        </button>
                       </div>
                     )}
 
@@ -854,7 +929,7 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                     <button
                       key={p.k}
                       type="button"
-                      disabled={rodando}
+                      disabled={rodando || iniciando}
                       onClick={() => setPeriodo(p.k)}
                       className={`border px-3 py-2 text-sm font-medium transition ${
                         periodo === p.k ? "border-forest-900 bg-forest-900 text-white" : "border-line-strong bg-white text-neutral-700 hover:border-forest-900"
@@ -866,29 +941,32 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                 </div>
                 <p className="mb-4 text-xs text-neutral-500">
                   {estimativa
-                    ? `Cerca de ${num(estimativa.sessoes)} conversas para ler, uns ${num(estimativa.minutos)} minuto(s).`
-                    : "Calculando o tempo…"}{" "}
-                  Mantenha esta página aberta até o fim; se fechar, é só voltar e continuar.
+                    ? `Cerca de ${num(estimativa.sessoes)} conversas${estimativa.soAnuncios ? " vindas de anúncio" : ""} para ler, uns ${duracao(estimativa.minutos)}.`
+                    : "Calculando o tempo…"}
                 </p>
+                {rodando && (
+                  <div className="mb-4 flex items-start gap-2 border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+                    <Loader2 size={16} className="mt-0.5 shrink-0 animate-spin" />
+                    <span>
+                      <strong>Em andamento, em segundo plano.</strong> Você pode sair desta tela e fazer outras coisas:
+                      a atualização continua sozinha. Para parar, é só voltar aqui e clicar em “Parar”.
+                    </span>
+                  </div>
+                )}
 
                 <div className="flex flex-wrap items-center gap-3">
                   {!rodando ? (
-                    <button onClick={iniciarPassado} className={btnPrimario}>
-                      <History size={15} /> Ligar e atualizar o passado
+                    <button onClick={iniciarPassado} disabled={iniciando} className={btnPrimario}>
+                      {iniciando ? <Loader2 size={15} className="animate-spin" /> : <History size={15} />} Ligar e atualizar o passado
                     </button>
                   ) : (
                     <button onClick={pararPassado} className="inline-flex items-center gap-2 border border-red-400 px-5 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50">
                       <X size={15} /> Parar
                     </button>
                   )}
-                  {!rodando && !emUso && (
+                  {!rodando && !iniciando && !emUso && (
                     <button onClick={() => alternarUso(true)} disabled={ligando} className={btnSecundario}>
                       {ligando && <Loader2 size={14} className="animate-spin" />} Só ligar daqui para frente
-                    </button>
-                  )}
-                  {!rodando && job?.status === "rodando" && (
-                    <button onClick={() => correr(job)} className={btnSecundario}>
-                      <RefreshCw size={15} /> Continuar a atualização anterior
                     </button>
                   )}
                 </div>
@@ -916,6 +994,11 @@ export function EditorTemplate({ tipo, id, onFechar, onMudou }: Props) {
                     </div>
                     <div className="mt-2 text-xs text-neutral-600">
                       {num(job.sessoes_processadas)} de {num(job.total_sessoes)} conversas lidas · {num(job.mensagens_gravadas)} mensagem(ns) novas guardadas
+                      {rodando && job.sessoes_processadas > 0 && job.total_sessoes > job.sessoes_processadas && (
+                        <>
+                          {" "}· faltam cerca de {duracao(((job.total_sessoes - job.sessoes_processadas) * (Date.now() - new Date(job.created_at).getTime())) / job.sessoes_processadas / 60000)}
+                        </>
+                      )}
                     </div>
                     {job.ultimo_erro && <div className="mt-2 text-xs text-red-700">{job.ultimo_erro}</div>}
                   </div>

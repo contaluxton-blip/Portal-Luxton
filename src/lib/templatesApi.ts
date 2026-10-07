@@ -169,7 +169,7 @@ async function chamarFuncao<T>(body: Record<string, unknown>): Promise<T> {
 
 // Testa a configuração SALVA do template (o resultado fica guardado para conferência).
 export const testarTemplate = (p: { tipo: TipoTemplate; templateId: string; dias: number; offset: number }) =>
-  chamarFuncao<{ sessoesLidas: number; totalSessoes: number; proximoOffset: number }>({
+  chamarFuncao<{ sessoesLidas: number; totalSessoes: number; proximoOffset: number; filtradoPorAnuncio: boolean }>({
     action: "testar",
     tipo: p.tipo,
     template_id: p.templateId,
@@ -180,14 +180,11 @@ export const testarTemplate = (p: { tipo: TipoTemplate; templateId: string; dias
 export const ligarTemplate = (tipo: TipoTemplate, id: string, ligar: boolean) =>
   chamarFuncao<{ ok: boolean }>({ action: "ligar", tipo, template_id: id, ligar });
 
-export const estimarRetroativo = (desde: string) =>
-  chamarFuncao<{ sessoes: number; minutos: number }>({ action: "estimar", desde });
+export const estimarRetroativo = (tipo: TipoTemplate, id: string, desde: string) =>
+  chamarFuncao<{ sessoes: number; minutos: number; soAnuncios: boolean }>({ action: "estimar", tipo, template_id: id, desde });
 
 export const iniciarRetroativo = (p: { tipo: TipoTemplate; templateId: string; desde: string }) =>
   chamarFuncao<{ job: JobRetro }>({ action: "retro_iniciar", tipo: p.tipo, template_id: p.templateId, desde: p.desde });
-
-export const passoRetroativo = (jobId: string) =>
-  chamarFuncao<{ job: JobRetro }>({ action: "retro_passo", job_id: jobId });
 
 export const cancelarRetroativo = (jobId: string) =>
   chamarFuncao<{ job: JobRetro }>({ action: "retro_cancelar", job_id: jobId });
