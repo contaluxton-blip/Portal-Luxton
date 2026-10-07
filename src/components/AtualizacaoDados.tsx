@@ -122,12 +122,12 @@ export function AtualizacaoDados({ onConcluida }: Props) {
           <>
             <div
               className="text-right leading-tight"
-              title={`Última atualização completa: ${quando(st.ultima_concluida_em)}${
+              title={`Última atualização completa do Vista e do RealMate${
                 st.ultima_origem === "manual" ? " (manual)" : st.ultima_origem === "agenda" ? " (automática)" : ""
-              }. Próxima automática: ${quando(st.proxima_agenda)}.`}
+              }: começou ${quando(st.ultima_iniciada_em)} e terminou ${quando(st.ultima_concluida_em)}. Tudo o que mudou até o começo está nos dados. Telas de Campanhas refeitas em ${quando(st.dados_atualizados_em)}. Próxima automática: ${quando(st.proxima_agenda)}.`}
             >
-              <div className="text-[11px] uppercase tracking-wider text-neutral-400">Dados atualizados</div>
-              <div className="text-sm font-medium text-neutral-700">{quando(st.dados_atualizados_em)}</div>
+              <div className="text-[11px] uppercase tracking-wider text-neutral-400">Dados atualizados até</div>
+              <div className="text-sm font-medium text-neutral-700">{quando(st.ultima_iniciada_em)}</div>
             </div>
             {st.pode_rodar && (
               <button
@@ -181,7 +181,9 @@ export function AtualizacaoDados({ onConcluida }: Props) {
                 <li>Não dá para rodar duas ao mesmo tempo, e só dá para pedir outra 5 minutos depois desta.</li>
                 <li>As atualizações automáticas (06h, 12h e 18h) continuam acontecendo normalmente.</li>
               </ul>
-              <p className="text-xs text-neutral-500">Última atualização das telas: {quando(st.dados_atualizados_em)}.</p>
+              <p className="text-xs text-neutral-500">
+                Os dados do Vista e do RealMate estão atualizados até {quando(st.ultima_iniciada_em)}. Mudanças depois disso só entram numa nova atualização.
+              </p>
             </div>
             <div className="flex items-center justify-end gap-3 border-t border-line-strong px-6 py-4">
               <button

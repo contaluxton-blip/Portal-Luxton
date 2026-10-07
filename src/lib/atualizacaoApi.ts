@@ -12,6 +12,7 @@ export type StatusAtualizacao = {
   etapa_atual: string | null;
   etapa_detalhe: { feitas: number; total: number } | null;
   dados_atualizados_em: string | null; // quando as telas de Campanhas foram atualizadas pela última vez
+  ultima_iniciada_em: string | null; // começo da última atualização geral completa: tudo que mudou até aqui está nos dados
   ultima_concluida_em: string | null; // fim da última atualização geral
   ultima_origem: "agenda" | "manual" | null;
   ultima_status: "concluida" | "erro" | null;
